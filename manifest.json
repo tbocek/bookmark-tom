@@ -1,0 +1,33 @@
+{
+  "manifest_version": 2,
+  "name": "Tom's Bookmark Saver",
+  "version": "1.0",
+  "description": "A bookmark extension that syncs the bookmarks via WebDAV, for example with NextCloud.",
+  "icons": {
+    "48": "icons/logo.png"
+  },
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "downloads",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/logo.png"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "applications": {
+    "gecko": {
+      "id": "{3625c546-2af3-41b5-8a51-1322108cb261}"
+    }
+  }
+}
