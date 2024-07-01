@@ -19,17 +19,6 @@ async function addAuthHeader(details) {
     return { requestHeaders: details.requestHeaders };
 }
 
-(async () => {
-    const config = await browser.storage.sync.get(['webdavUrl']);
-    const url = config.webdavUrl;
-    // Add listener to modify request headers
-    browser.webRequest.onBeforeSendHeaders.addListener(
-        addAuthHeader,
-        { urls: [url] },
-        ["blocking", "requestHeaders"]
-    );
-})();
-
 //************************** WEBDAV **************************
 async function fetchBookmarksFromWebDAV(url, username, password) {
     const headers = new Headers();
@@ -37,9 +26,12 @@ async function fetchBookmarksFromWebDAV(url, username, password) {
     headers.set('X-Extension-Request', 'bookmark');
 
     try {
-        const response = await fetch(url, { headers: headers });
+        const response = await fetch(url, {
+            headers: headers,
+            credentials: 'omit',
+        });
         if(response.status === 404) { //its empty on the remote site
-            return [];
+            return null;
         }
 
         if (!response.ok) {
@@ -61,6 +53,7 @@ async function updateWebDAVFile(url, username, password, bookmarks) {
     const response = await fetch(url, {
         method: 'PUT',
         headers: headers,
+        credentials: 'omit',
         body: JSON.stringify(bookmarks)
     });
 
@@ -70,187 +63,390 @@ async function updateWebDAVFile(url, username, password, bookmarks) {
 }
 //************************** LOCAL BOOKMARKS **************************
 // Function to recursively fetch and structure bookmarks
-function fetchBookmarksLocal(bookmarks, parentPath = "") {
+async function fetchBookmarksLocal(bookmarks, parentPath = "") {
     let results = [];
 
-    bookmarks.forEach(bookmark => {
+    for (const bookmark of bookmarks) {
+        const bookmarkData = {
+            title: bookmark.title,
+            index: bookmark.index,
+            path: parentPath
+        };
+
         if (bookmark.url) {
-            results.push({
-                title: bookmark.title,
-                url: bookmark.url,
-                id: bookmark.id,
-                path: parentPath
-            });
+            bookmarkData.url = bookmark.url;
         }
+
+        results.push(bookmarkData);
 
         // If the bookmark has children, fetch and structure them recursively
         if (bookmark.children) {
             const isRoot = bookmark.title === ""
-            results = results.concat(fetchBookmarksLocal(bookmark.children, isRoot ? "":`${parentPath}/${bookmark.title}`));
+            const childrenPath = isRoot ? "" : `${parentPath}/${bookmark.title}`;
+            const childrenResults = await fetchBookmarksLocal(bookmark.children, childrenPath);
+            results = results.concat(childrenResults);
         }
-    });
+    }
 
     return results;
 }
 
-// Function to update local bookmarks
-async function updateLocalBookmarks(bookmarks) {
-    const localBookmarkTree = await browser.bookmarks.getTree();
-    const localBookmarks = fetchBookmarksLocal(localBookmarkTree);
-    const existingMapUrl = new Map(localBookmarks.map(b => [b.url + b.path, b]));
-    const existingMapTitle = new Map(localBookmarks.map(b => [b.title + b.path, b]));
-    const existingMapOnlyUrl = new Map(localBookmarks.map(b => [b.url, b]));
+async function findBookmarkId(url, title, index, path) {
+    let searchResults;
 
-    isUpdatingBookmarks = false;
+    // If a URL is provided, search by URL
+    if (url) {
+        searchResults = await browser.bookmarks.search({ url });
+    } else {
+        // If no URL is provided, search by title
+        searchResults = await browser.bookmarks.search({ title });
+    }
+
+    for (const bookmark of searchResults) {
+        // Check additional criteria to ensure it's the correct bookmark
+        if (bookmark.title === title && (index === null || bookmark.index === index) && (url === null || bookmark.url === url)) {
+            // Reconstruct the path
+            let currentNode = bookmark;
+            let currentPath =  "";
+            while (currentNode.parentId) {
+                const parentNode = await browser.bookmarks.get(currentNode.parentId);
+                currentNode = parentNode[0];
+                currentPath = currentNode.title + (currentPath ? '/' + currentPath : '');
+            }
+            // Compare paths
+            if (currentPath === path) {
+                return bookmark.id;
+            }
+        }
+    }
+
+    return null; // No matching bookmark found
+}
+
+async function findBookmarkPath(path) {
+    const bookmarkTree = await browser.bookmarks.getTree();
+    const sanitizedPath = path.replace(/^\/+/, ''); // Remove leading slashes
+    const pathParts = sanitizedPath.split('/');
+
+    function searchTree(nodes, pathParts) {
+        if (pathParts.length === 0) {
+            return null;
+        }
+
+        const [currentPart, ...remainingParts] = pathParts;
+
+        for (const node of nodes) {
+            console.log("search in nodes", node.title, currentPart)
+            if (node.title === currentPart) {
+                if (remainingParts.length === 0) {
+                    console.log(node.title)
+                    return node.id;
+                } else if (node.children) {
+                    const result = searchTree(node.children, remainingParts);
+                    if (result) {
+                        return result;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    return searchTree(bookmarkTree[0].children, pathParts);
+}
+
+async function updateLocalBookmarks(delBookmarks, insBookmarks, upBookmarksUrls, upBookmarksTitles, upBookmarksIndexes) {
     try {
-        for (const bookmark of bookmarks) {
-            const existingBookmarkUrl = existingMapUrl.get(bookmark.url + bookmark.path);
-            const existingBookmarkTitle = existingMapTitle.get(bookmark.title + bookmark.path);
-            const existingBookmarkUrlOnly = existingMapOnlyUrl.get(bookmark.url);
-            const path = bookmark.path.split('/').slice(1).join('/'); // Remove leading slash
-
-            //title changed but not URL
-            if (existingBookmarkUrl) {
-                if (existingBookmarkUrl.title !== bookmark.title) {
-                    await browser.bookmarks.update(existingBookmarkUrl.id, {title: bookmark.title});
-                }
-            } else if (existingBookmarkTitle) {
-                if (existingBookmarkTitle.url !== bookmark.url) {
-                    await browser.bookmarks.update(existingBookmarkTitle.id, {url: bookmark.url});
-                }
-            } else {
-                if (existingBookmarkUrlOnly) {
-                    await browser.bookmarks.remove(existingBookmarkUrlOnly.id);
-                }
-                const parentId = await createFolders(path);
-                await browser.bookmarks.create({title: bookmark.title, url: bookmark.url, parentId: parentId});
+        // Delete bookmarks
+        for (let i = delBookmarks.length - 1; i >= 0; i--) {
+            const delBookmark = delBookmarks[i];
+            const id = await findBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
+            if (id) {
+                await browser.bookmarks.remove(id);
+                console.log('Bookmark removed successfully.', delBookmark.title);
             }
         }
-    } finally {
-        isUpdatingBookmarks = true;
+        // Insert bookmarks
+        for (const insBookmark of insBookmarks) {
+            console.log("search path", insBookmark.path)
+            const parentId = await findBookmarkPath(insBookmark.path);
+            console.log("search parentId", parentId)
+            if (parentId) {
+                await browser.bookmarks.create({
+                    parentId,
+                    title: insBookmark.title,
+                    url: insBookmark.url,
+                    index: insBookmark.index
+                });
+                console.log('Bookmark created successfully.', insBookmark.title);
+            }
+        }
+
+        // Update Bookmarks
+        for (const upBookmarksUrl of upBookmarksUrls) {
+            const id = await findBookmarkId(upBookmarksUrl.oldUrl, upBookmarksUrl.title, null, upBookmarksUrl.path);
+            if (id) {
+                await browser.bookmarks.update(id, {url: upBookmarksUrl.url});
+                console.log('Bookmark url updated.', upBookmarksUrl.url);
+            }
+        }
+        for (const upBookmarksTitle of upBookmarksTitles) {
+            const id = await findBookmarkId(upBookmarksTitle.url, upBookmarksTitle.oldTitle, null, upBookmarksTitle.path);
+            if (id) {
+                await browser.bookmarks.update(id, {title: upBookmarksTitle.title});
+                console.log('Bookmark title updated.', upBookmarksTitle.title);
+            }
+        }
+        for (const upBookmarksIndex of upBookmarksIndexes) {
+            const id = await findBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
+            if (id) {
+                await browser.bookmarks.move(id, {index: upBookmarksIndex.index});
+                console.log('Bookmark index updated.', upBookmarksIndex.index);
+            }
+        }
+        console.log('Bookmarks updated successfully.');
+    } catch (error) {
+        console.error('Error updating bookmarks:', error);
     }
 }
 
-// Function to create folders if they don't exist
-async function createFolders(path) {
-    const parts = path.split('/').filter(Boolean);;
-    let currentFolderId = 'toolbar_____';  // Assuming the root is the bookmarks toolbar
+//************************** NOTIFICATION ************************
+let previousTabId;
+async function openConfirmationPage(changes, action, localBookmarks) {
+    const { insertions, deletions, updateUrls, updateTitles, updateIndexes } = changes;
 
-    for (const part of parts) {
+    // Store changes and context in the browser's local storage
+    browser.storage.local.set({
+        insertions: insertions,
+        deletions: deletions,
+        updateUrls: updateUrls,
+        updateTitles: updateTitles,
+        updateIndexes: updateIndexes,
+        action: action,
+        localBookmarks: localBookmarks
+    });
 
-        if (part === "Bookmarks Toolbar" || part === "Bookmarks Menu") {
-            // Set the current folder ID to the respective root ID
-            if (part === "Bookmarks Toolbar") {
-                currentFolderId = 'toolbar_____'; // ID for Bookmarks Toolbar
-            } else if (part === "Bookmarks Menu") {
-                currentFolderId = 'menu________'; // ID for Bookmarks Menu
-            }
-            continue; // Skip to the next part
-        }
-
-        const existingFolders = await browser.bookmarks.getChildren(currentFolderId);
-        let folder = existingFolders.find(item => item.title === part && !item.url);
-        if (!folder) {
-            console.log("create folder", currentFolderId, part)
-            folder = await browser.bookmarks.create({ title: part, parentId: currentFolderId });
-        }
-        currentFolderId = folder.id;
-    }
-    return currentFolderId;
+    const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true });
+    previousTabId = currentTab.id;
+    // Open a new tab with the confirmation page
+    browser.tabs.create({ url: browser.extension.getURL('confirmation.html') });
 }
+
+async function closeWindow() {
+    const [confirmationTab] = await browser.tabs.query({ url: browser.extension.getURL('confirmation.html') });
+    if (confirmationTab) {
+        await browser.tabs.remove(confirmationTab.id);
+    }
+
+    // Activate the previous tab
+    if (previousTabId) {
+        await browser.tabs.update(previousTabId, { active: true });
+    }
+
+    // Clear stored data
+    await browser.storage.local.remove(['insertions', 'deletions', 'updateUrls', 'updateTitles', 'updateIndexes', 'action', 'localBookmarks']);
+    previousTabId = null;
+}
+
+browser.runtime.onMessage.addListener(async (message) => {
+    try {
+        if (message.action === 'Local Update') {
+            const {insertions, deletions, updateUrls, updateTitles, updateIndexes} = await browser.storage.local.get(['insertions', 'deletions', 'updateUrls', 'updateTitles', 'updateIndexes']);
+            await updateLocalBookmarks(deletions, insertions, updateUrls, updateTitles, updateIndexes);
+            await closeWindow();
+        } else if (message.action === 'Remote Update') {
+            const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
+            const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
+            const url = config.webdavUrl;
+            const username = config.webdavUsername;
+            const password = config.webdavPassword;
+            await updateWebDAVFile(url, username, password, localBookmarks);
+            await closeWindow();
+        } else if (message.action === 'cancelChanges') {
+            console.log('User cancelled the changes.');
+            await closeWindow();
+        }
+    } catch (e) {
+        console.log(e);
+    }
+});
+
 
 //************************** MAIN LOGIC **************************
 // Function to get all bookmarks and store them in local storage
-function syncAllBookmarks(localMaster) {
-    browser.bookmarks.getTree().then(async bookmarkTreeNodes => {
+async function syncAllBookmarks(localMaster) {
+    const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
+    const url = config.webdavUrl;
+    const username = config.webdavUsername;
+    const password = config.webdavPassword;
 
-        const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
-        const url = config.webdavUrl;
-        const username = config.webdavUsername;
-        const password = config.webdavPassword;
+    if(!url) {
+        throw new Error("URL not set!");
+    }
+    if(!username) {
+        throw new Error("username not set!");
+    }
+    if(!password) {
+        throw new Error("password not set!");
+    }
 
-        const localBookmarks = fetchBookmarksLocal(bookmarkTreeNodes);
-        const remoteBookmarks = await fetchBookmarksFromWebDAV(url,username,password);
+    const bookmarkTreeNodes = await browser.bookmarks.getTree()
+    const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
+    const remoteBookmarks = await fetchBookmarksFromWebDAV(url,username,password);
 
-        console.log(localBookmarks);
+    if(!bookmarksChanged(remoteBookmarks, localBookmarks)) {
+        console.log("not changed");
+        return;
+    }
 
-        //throw new Error("aoeuaoeuaoeu")
-
-        if(!bookmarksChanged(remoteBookmarks, localBookmarks)) {
-            console.log("not changed");
-            return;
-        }
-
-        let mergedBookmarks
-        if(localMaster) {
-            mergedBookmarks = mergeBookmarks(localBookmarks, remoteBookmarks);
-        } else {
-            mergedBookmarks = mergeBookmarks(remoteBookmarks, localBookmarks);
-        }
-
-
-        //remote changed upload to WebDav
-        let await1, await2;
-        if(bookmarksChanged(remoteBookmarks, mergedBookmarks)) {
-            console.log("dav changed");
-            await1 = updateWebDAVFile(url, username, password, mergedBookmarks);
-        }
-
-        if(bookmarksChanged(localBookmarks, mergedBookmarks)) {
-            console.log("local changed");
-            await2 = updateLocalBookmarks(mergedBookmarks);
-        }
-
-        if(await1) {
-            await await1;
-        }
-        if(await2) {
-            await await2;
-        }
-
-    });
+    if(localMaster || !remoteBookmarks) {
+        const changes = getBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+        console.log("local master", changes);
+        await openConfirmationPage(changes, 'Remote Update', localBookmarks);
+    } else {
+        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        console.log("remote master", changes);
+        await openConfirmationPage(changes, 'Local Update', null);
+    }
 }
 
-// Function to merge bookmarks while preserving order
-function mergeBookmarks(oldBookmarks, mainBookmarks) {
-    const localMap = new Map(oldBookmarks.map(b => [b.url + b.path, b]));
+function getBookmarkChanges(mainBookmarks, oldBookmarks) {
+    const oldBookmarksMap = new Map();
+    const mainBookmarksMap = new Map();
 
-    const mergedBookmarks = mainBookmarks.map(remoteBookmark => {
-        const localBookmark = localMap.get(remoteBookmark.url + remoteBookmark.path);
-        return localBookmark ? { ...localBookmark, ...remoteBookmark } : remoteBookmark;
-    });
-
-    const mergedSet = new Set(mergedBookmarks.map(b => b.url + b.path));
-
-    oldBookmarks.forEach(localBookmark => {
-        if (!mergedSet.has(localBookmark.url + localBookmark.path)) {
-            mergedBookmarks.push(localBookmark);
+    // Populate maps and check for duplicates in oldBookmarks
+    const deletions = [];
+    oldBookmarks.forEach(oldBookmark => {
+        const key = oldBookmark.url + oldBookmark.path + oldBookmark.title + oldBookmark.index;
+        if (oldBookmarksMap.has(key)) {
+            // Track duplicates in oldBookmarks for deletion
+            deletions.push(oldBookmark);
+        } else {
+            oldBookmarksMap.set(key, oldBookmark);
         }
     });
 
-    return mergedBookmarks;
+    // Populate maps and check for duplicates in mainBookmarks
+    const insertions = [];
+    mainBookmarks.forEach(mainBookmark => {
+        const key = mainBookmark.url + mainBookmark.path + mainBookmark.title + mainBookmark.index;
+        if (mainBookmarksMap.has(key)) {
+            // Track duplicates in mainBookmarks for deletion
+            insertions.push(mainBookmark);
+        } else {
+            mainBookmarksMap.set(key, mainBookmark);
+        }
+    });
+
+    // Identify insertions: bookmarks in mainBookmarks not present in oldBookmarks
+    mainBookmarksMap.forEach((mainBookmark, key) => {
+        if (!oldBookmarksMap.has(key)) {
+            insertions.push(mainBookmark);
+        }
+    });
+
+    // Identify deletions: bookmarks in oldBookmarks not present in mainBookmarks
+    oldBookmarksMap.forEach((oldBookmark, key) => {
+        if (!mainBookmarksMap.has(key)) {
+            deletions.push(oldBookmark);
+        }
+    });
+
+    const updateUrls = [];
+    const updateTitles = [];
+    const updateIndexes = [];
+
+    // Create a map from delBookmarks for quick lookup
+    const delMapUrl = new Map();
+    const delMapTitle = new Map();
+    const delMapIndex = new Map();
+    deletions.forEach(bookmark => {
+        const keyUrl = bookmark.title + bookmark.path + bookmark.index;
+        delMapUrl.set(keyUrl, bookmark);
+
+        let keyTitle;
+        if(bookmark.url) {
+            keyTitle = bookmark.url + bookmark.path + bookmark.index;
+        } else {
+            keyTitle = bookmark.path + bookmark.title;
+        }
+        delMapTitle.set(keyTitle, bookmark);
+
+        const keyIndex = bookmark.title + bookmark.path + bookmark.url;
+        delMapIndex.set(keyIndex, bookmark);
+    });
+
+    // Iterate over insBookmarks to find matching entries in delBookmarks with different indexes
+    for (let i = insertions.length - 1; i >= 0; i--) {
+        const insBookmark = insertions[i];
+        const keyUrl = insBookmark.title + insBookmark.path + insBookmark.index;
+        let keyTitle;
+        if(insBookmark.url) {
+            keyTitle = insBookmark.url + insBookmark.path + insBookmark.index;
+        } else {
+            keyTitle = insBookmark.path + insBookmark.title;
+        }
+        const keyIndex = insBookmark.title + insBookmark.path + insBookmark.url;
+        if (delMapIndex.has(keyIndex)) {
+            const delBookmark = delMapIndex.get(keyIndex);
+            if (delBookmark) {
+                updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
+                // Remove the entries from both delBookmarks and insBookmarks
+                deletions.splice(deletions.indexOf(delBookmark), 1);
+                insertions.splice(i, 1);
+            }
+        } else if (delMapTitle.has(keyTitle)) {
+            const delBookmark = delMapTitle.get(keyTitle);
+            if (delBookmark) {
+                console.log("old", delBookmark)
+                console.log("new", insBookmark)
+                updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
+                // Remove the entries from both delBookmarks and insBookmarks
+                deletions.splice(deletions.indexOf(delBookmark), 1);
+                insertions.splice(i, 1);
+            }
+        } else if (delMapUrl.has(keyUrl)) {
+            const delBookmark = delMapUrl.get(keyUrl);
+            if (delBookmark) {
+                console.log("old1", delBookmark)
+                console.log("new1", insBookmark)
+                updateUrls.push({...insBookmark, oldUrl: delBookmark.url});
+                // Remove the entries from both delBookmarks and insBookmarks
+                deletions.splice(deletions.indexOf(delBookmark), 1);
+                insertions.splice(i, 1);
+            }
+        }
+    }
+
+    return { insertions, deletions, updateUrls, updateTitles, updateIndexes};
 }
 
 // Function to compare bookmarks
 function bookmarksChanged(mainBookmarks, oldBookmarks) {
 
+    if(mainBookmarks === null && oldBookmarks.length > 0) {
+        return true;
+    }
+    console.log(mainBookmarks);
+    console.log(oldBookmarks);
     if (mainBookmarks.length !== oldBookmarks.length) {
         console.log("length change")
         return true;
     }
 
-    const localMap = new Map(oldBookmarks.map(b => [b.url + b.path, b]));
+    const localMap = new Map(oldBookmarks.map(b => [b.url + b.path + b.title + b.index, b]));
 
     for (const remoteBookmark of mainBookmarks) {
-        const localBookmark = localMap.get(remoteBookmark.url + remoteBookmark.path);
+        const localBookmark = localMap.get(remoteBookmark.url + remoteBookmark.path + remoteBookmark.title + remoteBookmark.index);
         if (!localBookmark) {
-            console.log("string change1")
+            console.log("string change1", remoteBookmark)
             return true;
         }
         if (JSON.stringify(remoteBookmark) !== JSON.stringify(localBookmark)) {
 
-            console.log(remoteBookmark)
-            console.log(localBookmark)
+            console.log(JSON.stringify(remoteBookmark))
+            console.log(JSON.stringify(localBookmark))
 
             console.log("string change2")
             return true;
@@ -261,44 +457,62 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
     return false;
 }
 
+(async () => {
+    await syncAllBookmarks(false); //sync on startup
+    setInterval(async () => {
+        await syncAllBookmarks(false); //sync every x minutes
+    }, 600000);
 
-syncAllBookmarks(false); //sync on startup
-setInterval(() => {
-    syncAllBookmarks(false); //sync every x minutes
-}, 600000);
+    const config = await browser.storage.sync.get(['webdavUrl']);
+    const url = config.webdavUrl;
+    if(!url) {
+        throw new Error("URL not set!");
+    }
+    // Add listener to modify request headers
+    browser.webRequest.onBeforeSendHeaders.addListener(
+        addAuthHeader,
+        { urls: [url] },
+        ["blocking", "requestHeaders"]
+    );
+})();
 
-let isUpdatingBookmarks = true;
+let debounceTimer;
+let isLocalDelete = false
+
+async function debounceSync(localMaster, localDelete) {
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+    }
+    if(!isLocalDelete && localDelete) {
+        isLocalDelete = true;
+    }
+
+    debounceTimer = setTimeout(async () => {
+        console.log("updatingBookmarks");
+        await syncAllBookmarks(localMaster);
+        isLocalDelete = false;
+    }, 1000);
+}
+
 // Listen for user changes to bookmarks
 browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-    if (isUpdatingBookmarks) {
-        console.log("updatingBookmarks");
-        syncAllBookmarks(true);
-    }
+    debounceSync(true, false);
 });
 browser.bookmarks.onCreated.addListener(async (id, changeInfo) => {
-    if (isUpdatingBookmarks) {
-        console.log("onCreated");
-        syncAllBookmarks(true);
-    }
+    debounceSync(true,false);
 });
 browser.bookmarks.onMoved.addListener(async (id, changeInfo) => {
-    if (isUpdatingBookmarks) {
-        console.log("onMoved");
-        syncAllBookmarks(true);
-    }
+    debounceSync(true,true);
 });
 browser.bookmarks.onRemoved.addListener(async (id, changeInfo) => {
-    if (isUpdatingBookmarks) {
-        console.log("onRemoved");
-        syncAllBookmarks(true);
-    }
+    debounceSync(true,true);
 });
 
 // Listen for messages to trigger the syncAllBookmarks function
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.command === "syncAllBookmarks") {
         try {
-            syncAllBookmarks(false).then(() => {
+            debounceSync(false, false).then(() => {
                 sendResponse({success: true});
             });
         } catch (error) {

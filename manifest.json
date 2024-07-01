@@ -10,6 +10,7 @@
     "bookmarks",
     "storage",
     "downloads",
+    "notifications",
     "webRequest",
     "webRequestBlocking",
     "<all_urls>"
