@@ -1,31 +1,88 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>Confirm Changes</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             padding: 20px;
+            background-color: #f9f9f9;
         }
         h1 {
-            font-size: 20px;
+            font-size: 24px;
+            margin-bottom: 20px;
+            text-align: center; /* Center align the heading */
+        }
+        h2 {
+            font-size: 18px;
+            margin-top: 20px;
         }
         ul {
             list-style: none;
             padding: 0;
         }
         li {
+            background: #fff;
+            padding: 10px;
             margin-bottom: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .url {
+            font-size: 13px;
+        }
+        .path {
+            font-size: 12px;
+            color: #555;
+        }
+        .action-icon {
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        .buttons {
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        #confirm-merge {
+            background-color: #28a745;
+            color: white;
+        }
+        #confirm-force {
+            background-color: #007bff;
+            color: white;
+        }
+        #cancel {
+            background-color: #dc3545;
+            color: white;
+        }
+        .icon {
+            width: 64px;
+            height: 64px;
+            margin-left: 10px;
+        }
+        .logo {
+            display: block;
+            margin: 0 auto 20px; /* Center align logo with margin */
         }
     </style>
 </head>
 <body>
+<img src="icons/logo.svg" alt="Logo" width="100" class="logo">
 <h1>Confirm Bookmark Changes</h1>
 <div id="insertions"></div>
 <div id="deletions"></div>
 <div id="updates"></div>
-<button id="confirm">Yes</button>
-<button id="cancel">No</button>
+<div class="buttons">
+    <button id="confirm-force">Proceed</button>
+    <button id="confirm-merge" disabled="true">Proceed (merge, do not delete)</button>
+    <button id="cancel">Cancel</button>
+</div>
 <script src="confirmation.js"></script>
 </body>
 </html>

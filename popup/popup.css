@@ -13,7 +13,7 @@ body {
 img {
     width: 48px; /* Adjust the size as needed */
     height: 48px; /* Adjust the size as needed */
-    background: url('../icons/logo.png') no-repeat center center;
+    background: url('../icons/logo.svg') no-repeat center center;
     background-size: contain;
     border: 2px solid transparent; /* Add a transparent border */
     border-radius: 5px; /* Add some border-radius for a button-like appearance */
