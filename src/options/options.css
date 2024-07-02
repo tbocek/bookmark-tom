@@ -1,0 +1,70 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+label {
+    display: block;
+    margin-top: 10px;
+}
+input {
+    width: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+}
+button {
+    margin-top: 20px;
+    padding: 8px 8px;
+    width: 15em;
+    text-align: center;
+}
+.status-success {
+    color: green;
+}
+.status-error {
+    color: red;
+}
+.icon-success {
+    color: green;
+}
+.spinner {
+    margin-top: 25px;
+    padding: 10px 10px;
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(0, 0, 0, 0.3);
+    border-radius: 50%;
+    border-top-color: #000;
+    animation: spin 1s ease-in-out infinite;
+    margin-left: 10px;
+    vertical-align: middle;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.container {
+    display: flex;
+    flex-direction: row;
+}
+#status {
+    margin-top: 1em;
+}
+
+#save-button {
+    background-color: #28a745;
+    color: white;
+}
+
+#test-button {
+    background-color: #007bff;
+    color: white;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin-right: 10px;
+    cursor: pointer;
+    border-radius: 8px; /* Rounded corners */
+    border: none; /* Remove default border */
+}

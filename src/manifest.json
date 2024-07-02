@@ -4,7 +4,7 @@
   "version": "1.0",
   "description": "A bookmark extension that syncs the bookmarks via WebDAV, for example with NextCloud.",
   "icons": {
-    "48": "icons/logo.png"
+    "48": "icons/logo.svg"
   },
   "permissions": [
     "bookmarks",
@@ -20,7 +20,7 @@
   },
   "browser_action": {
     "default_popup": "popup/popup.html",
-    "default_icon": "icons/logo.png"
+    "default_icon": "icons/logo.svg"
   },
   "options_ui": {
     "page": "options/options.html",

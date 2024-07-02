@@ -25,22 +25,18 @@ async function fetchBookmarksFromWebDAV(url, username, password) {
     headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
     headers.set('X-Extension-Request', 'bookmark');
 
-    try {
-        const response = await fetch(url, {
-            headers: headers,
-            credentials: 'omit',
-        });
-        if(response.status === 404) { //its empty on the remote site
-            return null;
-        }
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return await response.json();
-    } catch (error) {
-        console.error('Error fetching bookmarks:', error);
+    const response = await fetch(url, {
+        headers: headers,
+        credentials: 'omit',
+    });
+    if (response.status === 404) { //its empty on the remote site
+        return null;
     }
+
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return await response.json();
 }
 
 // Function to update the WebDAV file
@@ -320,18 +316,32 @@ async function syncAllBookmarks(localMaster) {
     const password = config.webdavPassword;
 
     if(!url) {
+        await browser.storage.local.set({ message: `URL not set!`});
         throw new Error("URL not set!");
     }
     if(!username) {
+        await browser.storage.local.set({ message: `username not set!`});
         throw new Error("username not set!");
     }
     if(!password) {
+        await browser.storage.local.set({ message: `password not set!`});
         throw new Error("password not set!");
     }
 
     const bookmarkTreeNodes = await browser.bookmarks.getTree()
     const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
-    const remoteBookmarks = await fetchBookmarksFromWebDAV(url,username,password);
+    let remoteBookmarks;
+    try {
+        remoteBookmarks = await fetchBookmarksFromWebDAV(url,username,password);
+    } catch (error) {
+        await browser.storage.local.set({ message: `Error fetching bookmarks: ${error}`});
+        throw error
+    }
+
+    // Store when last synced
+    const options = { day: 'numeric', month: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' };
+    const currentTime = new Date().toLocaleDateString('de-DE', options)
+    await browser.storage.local.set({ message: `Last sync: ${currentTime}`});
 
     if(!bookmarksChanged(remoteBookmarks, localBookmarks)) {
         return;
@@ -514,25 +524,24 @@ async function debounceSync(localMaster, localDelete) {
 
 // Listen for user changes to bookmarks
 browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-    debounceSync(true, false);
+    await debounceSync(true, false);
 });
 browser.bookmarks.onCreated.addListener(async (id, changeInfo) => {
-    debounceSync(true,false);
+    await debounceSync(true,false);
 });
 browser.bookmarks.onMoved.addListener(async (id, changeInfo) => {
-    debounceSync(true,true);
+    await debounceSync(true,true);
 });
 browser.bookmarks.onRemoved.addListener(async (id, changeInfo) => {
-    debounceSync(true,true);
+    await debounceSync(true,true);
 });
 
 // Listen for messages to trigger the syncAllBookmarks function
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
     if (message.command === "syncAllBookmarks") {
         try {
-            debounceSync(false, false).then(() => {
-                sendResponse({success: true});
-            });
+            await debounceSync(false, false);
+            sendResponse({success: true});
         } catch (error) {
             sendResponse({success: false, error: error});
         }

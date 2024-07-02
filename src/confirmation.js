@@ -20,23 +20,23 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     if (insertions && insertions.length > 0) {
-        insertionsDiv.innerHTML = createSection(`Bookmarks to be inserted (${action}):`, action, insertions);
+        insertionsDiv.innerHTML = createSection(`Insert (${action}):`, action, insertions);
     }
 
     if (deletions && deletions.length > 0) {
-        deletionsDiv.innerHTML = createSection(`Bookmarks to be deleted (${action}):`, action, deletions);
+        deletionsDiv.innerHTML = createSection(`Delete (${action}):`, action, deletions);
     }
 
     if (updateUrls && updateUrls.length > 0) {
-        updatesDiv.innerHTML = createSection(`Bookmarks to be updated / URL (${action}):`, action, updateUrls);
+        updatesDiv.innerHTML = createSection(`Updated URL (${action}):`, action, updateUrls);
     }
 
     if (updateTitles && updateTitles.length > 0) {
-        updatesDiv.innerHTML += createSection(`Bookmarks to be updated / Title (${action}):`, action, updateTitles);
+        updatesDiv.innerHTML += createSection(`Uupdat Title (${action}):`, action, updateTitles);
     }
 
     if (updateIndexes && updateIndexes.length > 0) {
-        updatesDiv.innerHTML += `<h2>Bookmarks to be updated / Index (${action}, ${updateIndexes.length})</h2>`;
+        updatesDiv.innerHTML += `<h2>Fix Index - ${updateIndexes.length} (${action})</h2>`;
     }
 
     const mergeBtn = document.getElementById('confirm-merge');
