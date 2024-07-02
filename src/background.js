@@ -269,44 +269,6 @@ async function closeWindow() {
     previousTabId = null;
 }
 
-browser.runtime.onMessage.addListener(async (message) => {
-    try {
-        if (message.action === 'Local Update') {
-            const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
-            await updateLocalBookmarksInsDel(deletions, insertions);
-            //Now we need to rescan, as indexes may have shifted
-            const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
-            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
-            await closeWindow();
-        } else if (message.action === 'Local Update-merge') {
-            const {insertions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'remoteBookmarks']);
-            await updateLocalBookmarksInsDel([], insertions);
-            //Now we need to rescan, as indexes may have shifted
-            const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
-            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
-            await closeWindow();
-        }
-        else if (message.action === 'Remote Update') {
-            const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
-            const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
-            const url = config.webdavUrl;
-            const username = config.webdavUsername;
-            const password = config.webdavPassword;
-            await updateWebDAVFile(url, username, password, localBookmarks);
-            await closeWindow();
-        } else if (message.action === 'cancelChanges') {
-            await closeWindow();
-        }
-    } catch (error) {
-        console.error("Error in updating", error);
-    }
-});
-
-
 //************************** MAIN LOGIC **************************
 // Function to get all bookmarks and store them in local storage
 async function syncAllBookmarks(localMaster) {
@@ -487,11 +449,6 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
 }
 
 (async () => {
-    await syncAllBookmarks(false); //sync on startup
-    setInterval(async () => {
-        await syncAllBookmarks(false); //sync every x minutes
-    }, 600000);
-
     const config = await browser.storage.sync.get(['webdavUrl']);
     const url = config.webdavUrl;
     if(!url) {
@@ -503,6 +460,11 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
         { urls: [url] },
         ["blocking", "requestHeaders"]
     );
+
+    await syncAllBookmarks(false); //sync on startup
+    setInterval(async () => {
+        await syncAllBookmarks(false); //sync every x minutes
+    }, 600000);
 })();
 
 let debounceTimer;
@@ -538,13 +500,46 @@ browser.bookmarks.onRemoved.addListener(async (id, changeInfo) => {
 
 // Listen for messages to trigger the syncAllBookmarks function
 browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
-    if (message.command === "syncAllBookmarks") {
-        try {
-            await debounceSync(false, false);
-            sendResponse({success: true});
-        } catch (error) {
-            sendResponse({success: false, error: error});
+    try {
+        if (message.action === 'Local Update') {
+            const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
+            await updateLocalBookmarksInsDel(deletions, insertions);
+            //Now we need to rescan, as indexes may have shifted
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
+            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
+            await closeWindow();
+        } else if (message.action === 'Local Update-merge') {
+            const {insertions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'remoteBookmarks']);
+            await updateLocalBookmarksInsDel([], insertions);
+            //Now we need to rescan, as indexes may have shifted
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
+            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
+            await closeWindow();
+        }
+        else if (message.action === 'Remote Update') {
+            const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
+            const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
+            const url = config.webdavUrl;
+            const username = config.webdavUsername;
+            const password = config.webdavPassword;
+            await updateWebDAVFile(url, username, password, localBookmarks);
+            await closeWindow();
+        } else if (message.action === 'cancelChanges') {
+            await closeWindow();
+        } else if (message.command === "syncAllBookmarks") {
+            try {
+                await debounceSync(false, false);
+                sendResponse({success: true});
+            } catch (error) {
+                sendResponse({success: false, error: error});
+            }
         }
         return true;  // Keep the message channel open for sendResponse
+    } catch (error) {
+        console.error("Error in updating", error);
     }
 });
