@@ -1,6 +1,7 @@
 async function fetchBookmarksFromWebDAV(url, username, password) {
     const headers = new Headers();
     headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
+    headers.set('X-Extension-Request', 'bookmark');
 
     const response = await fetch(url, {
         headers: headers,

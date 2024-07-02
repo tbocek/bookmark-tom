@@ -302,7 +302,7 @@ browser.runtime.onMessage.addListener(async (message) => {
             await closeWindow();
         }
     } catch (error) {
-        console.log("Error in updating", error);
+        console.error("Error in updating", error);
     }
 });
 

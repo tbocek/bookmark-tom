@@ -4,9 +4,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     syncButton.addEventListener('click', async() => { // Add event listener for sync button
         const success = await browser.runtime.sendMessage({ command: "syncAllBookmarks" });
         //TODO: check success -> this is for some reason undefinde?
-        console.log("success");
         const storageData = await browser.storage.local.get(['message']);
-        console.log(storageData);
         lastSynced.textContent = storageData.message;
     });
 
