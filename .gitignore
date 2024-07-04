@@ -1,3 +1,4 @@
 .idea
 web-ext-artifacts
 node_modules
+src/.amo-upload-uuid

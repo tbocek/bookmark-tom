@@ -1,43 +1,79 @@
 body {
     font-family: Arial, sans-serif;
-    margin: 20px;
+    margin: 1em;
 }
 label {
     display: block;
-    margin-top: 10px;
+    margin-top: 1em;
 }
 input {
-    width: 100%;
-    padding: 8px;
+    padding: 0.5em;
     box-sizing: border-box;
+    border-radius: 8px;
+    border: 1px solid #aaa;
 }
 button {
-    margin-top: 20px;
-    padding: 8px 8px;
-    width: 15em;
     text-align: center;
+    vertical-align: center;
+    padding: 0.5em;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 8px;
+    border: none;
+    margin-top: 1em;
+    margin-right: 1em;
+    color: white;
 }
-.status-success {
+img {
+    width: 1em;
+    height: 1em;
+}
+.input-group {
+    display: flex;
+    align-items: center;
+}
+.info-icon {
+    display: inline-block;
+    margin-left: 5px;
+    color: blue;
+    cursor: pointer;
+    position: relative;
+}
+.info-icon::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 125%;
+    background-color: #333;
+    color: #fff;
+    padding: 5px;
+    border-radius: 8px;
+    white-space: pre; /* Allows for newlines */
+    visibility: hidden;
+    opacity: 0;
+    transition: visibility 0s, opacity 0.2s ease-in-out;
+}
+.info-icon:hover::after {
+    visibility: visible;
+    opacity: 1;
+}
+.success {
     color: green;
 }
-.status-error {
+.error {
     color: red;
 }
-.icon-success {
-    color: green;
-}
 .spinner {
-    margin-top: 25px;
-    padding: 10px 10px;
     display: inline-block;
-    width: 24px;
-    height: 24px;
+    width: 1.5em;
+    height: 1.5em;
     border: 3px solid rgba(0, 0, 0, 0.3);
     border-radius: 50%;
     border-top-color: #000;
     animation: spin 1s ease-in-out infinite;
-    margin-left: 10px;
     vertical-align: middle;
+}
+.button-text {
+    padding: 1em;
 }
 @keyframes spin {
     to { transform: rotate(360deg); }
@@ -49,22 +85,9 @@ button {
 #status {
     margin-top: 1em;
 }
-
 #save-button {
     background-color: #28a745;
-    color: white;
 }
-
 #test-button {
     background-color: #007bff;
-    color: white;
-}
-
-button {
-    padding: 10px 20px;
-    font-size: 16px;
-    margin-right: 10px;
-    cursor: pointer;
-    border-radius: 8px; /* Rounded corners */
-    border: none; /* Remove default border */
 }

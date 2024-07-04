@@ -232,7 +232,7 @@ async function openConfirmationPage(changes, action, localBookmarks, remoteBookm
         remoteBookmarks: remoteBookmarks
     });
 
-    const confirmationPageUrl = browser.runtime.getURL('confirmation.html');
+    const confirmationPageUrl = browser.runtime.getURL('confirmation/confirmation.html');
 
     // Check if the confirmation page is already open
     const tabs = await browser.tabs.query({});
@@ -249,12 +249,12 @@ async function openConfirmationPage(changes, action, localBookmarks, remoteBookm
     const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true });
     previousTabId = currentTab.id;
     // Open a new tab with the confirmation page
-    const newTab = await browser.tabs.create({ url: browser.runtime.getURL('confirmation.html') });
+    const newTab = await browser.tabs.create({ url: browser.runtime.getURL('confirmation/confirmation.html') });
     confirmationTabId = newTab.id;
 }
 
 async function closeWindow() {
-    const [confirmationTab] = await browser.tabs.query({ url: browser.runtime.getURL('confirmation.html') });
+    const [confirmationTab] = await browser.tabs.query({ url: browser.runtime.getURL('confirmation/confirmation.html') });
     if (confirmationTab) {
         await browser.tabs.remove(confirmationTab.id);
     }

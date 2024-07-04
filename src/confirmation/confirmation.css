@@ -1,0 +1,83 @@
+body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    background-color: #f9f9f9;
+}
+h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+h2 {
+    font-size: 18px;
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+ul {
+    list-style: none;
+    padding: 0;
+}
+li {
+    background: #fff;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+.url {
+    font-size: 13px;
+}
+.path {
+    font-size: 12px;
+    color: #555;
+}
+.action-icon {
+    vertical-align: middle;
+    margin-right: 10px;
+}
+.buttons {
+    margin-top: 20px;
+}
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin-right: 10px;
+    cursor: pointer;
+    border-radius: 8px; /* Rounded corners */
+    border: none; /* Remove default border */
+}
+#confirm-merge {
+    background-color: #28a745;
+    color: white;
+}
+#confirm-merge:disabled {
+    background-color: #94d3a2;
+    cursor: not-allowed;
+}
+#confirm-force {
+    background-color: #007bff;
+    color: white;
+}
+#cancel {
+    background-color: #dc3545;
+    color: white;
+}
+.icon {
+    width: 64px;
+    height: 64px;
+    margin-left: 10px;
+}
+.logo {
+    display: block;
+    margin: 0 auto 20px; /* Center align logo with margin */
+}
+.content-div {
+    display: inline-block;
+    width: 50em; /* Fixed width for all content divs */
+    text-align: left; /* Ensure content is left-aligned within the div */
+    margin-bottom: 20px; /* Add some space between the content sections */
+}

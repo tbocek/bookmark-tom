@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const webdavUrlInput = document.getElementById('webdav-url');
     const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
+    const checkIntervalInput = document.getElementById('checkInterval');
     const statusDiv = document.getElementById('status');
     const testButton = document.getElementById('test-button');
     const spinner = document.getElementById('spinner');
@@ -31,21 +32,22 @@ document.addEventListener('DOMContentLoaded', () => {
         webdavUrlInput.value = config.webdavUrl || '';
         usernameInput.value = config.webdavUsername || '';
         passwordInput.value = config.webdavPassword || '';
+        checkIntervalInput.value= config.checkInterval || '';
     });
 
     saveButton.addEventListener('click', () => {
         const webdavUrl = webdavUrlInput.value;
         const username = usernameInput.value;
         const password = passwordInput.value;
+        const checkInterval = checkIntervalInput.value;
 
         browser.storage.sync.set({
             webdavUrl,
             webdavUsername: username,
             webdavPassword: password,
+            checkInterval: checkInterval
         }).then(() => {
-            statusDiv.textContent = 'Configuration saved.';
-            statusDiv.classList.remove('status-error');
-            statusDiv.classList.add('status-success');
+            statusDiv.innerHTML = '<span class="success">Configuration saved.</span>';
         });
     });
 
@@ -55,22 +57,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const password = passwordInput.value;
 
         try {
-            spinner.style.display = 'inline-block';
-            testButton.insertAdjacentElement('afterend', spinner);
+            spinner.style.visibility = '';
             const success = await fetchBookmarksFromWebDAV(webdavUrl,username,password);
             if (success) {
-                statusDiv.innerHTML = '<span class="icon-success">&#10004;</span> Connection successful.';
-                statusDiv.classList.remove('status-error');
-                statusDiv.classList.add('status-success');
+                statusDiv.innerHTML = '<span class="success">&#10004; Connection successful.</span>';
             } else {
                 throw new Error('Failed to connect to WebDAV server.');
             }
         } catch (error) {
-            statusDiv.textContent = `Error: ${error.message}`;
-            statusDiv.classList.remove('status-success');
-            statusDiv.classList.add('status-error');
+            statusDiv.textContent = `<span class="error">Error: ${error.message}</span>`;
         } finally {
-            spinner.style.display = 'none';
+            spinner.style.visibility = 'hidden';
         }
     });
 });

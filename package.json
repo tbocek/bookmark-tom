@@ -5,8 +5,8 @@
   "author": "Thomas Bocek <tom@tomp2p.net>",
   "license": "MIT",
   "scripts": {
-    "lint": "npx web-ext lint -s src",
-    "build": "npx web-ext build -s src --overwrite-dest"
+    "lint": "npx web-ext lint --source-dir src",
+    "build": "npx web-ext build --source-dir src --overwrite-dest"
   },
   "devDependencies": {
     "web-ext": "^8.2.0"
