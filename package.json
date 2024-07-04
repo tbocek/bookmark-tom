@@ -8,7 +8,8 @@
     "lint": "npx web-ext lint --source-dir src",
     "build": "npx web-ext build --source-dir src --overwrite-dest",
     "clean": "rm -rf node_modules; rm -rf web-ext-artifacts; rm src/.amo-upload-uuid",
-    "patch": "[ -z \"$(git status --porcelain)\" ] && git tag $(jq -r '.version' src/manifest.json | xargs semver -i patch) && git push origin main --tags"
+    "patch": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i patch) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'",
+    "minor": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i minor) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'"
   },
   "devDependencies": {
     "web-ext": "^8.2.0"
