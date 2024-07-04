@@ -16,29 +16,15 @@ jobs:
         with:
           fetch-depth: 0  # Fetch all tags and branches
 
-      - name: Get the tag name
-        id: get_tag
-        run: echo "::set-output name=tag::${GITHUB_REF#refs/tags/}"
+      - name: Determine the current tag
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Update version in package.json
         run: |
-          TAG_NAME=${{ steps.get_tag.outputs.tag }}
-          jq --arg tag "$TAG_NAME" '.version = $tag' package.json > package.tmp.json
+          jq --arg tag "${{ env.TAG }}" '.version = $tag' package.json > package.tmp.json
           mv package.tmp.json package.json
-          cat package.json
-          jq --arg tag "$TAG_NAME" '.version = $tag' src/manifest.json > src/manifest.tmp.json
+          jq --arg tag "${{ env.TAG }}" '.version = $tag' src/manifest.json > src/manifest.tmp.json
           mv src/manifest.tmp.json src/manifest.json
-          cat src/manifest.json
-
-      - name: Commit version update
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-          git add package.json src/manifest.json
-          git commit -m "Update version to ${{ steps.get_tag.outputs.tag }}"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -60,11 +46,14 @@ jobs:
             --api-secret $AMO_API_SECRET \
             --channel listed \
 
-      - name: Upload signed extension
-        uses: wdzeng/firefox-addon@v1
-        with:
-          addon-guid: your-addon's-guid
-          xpi-path: your-addon.zip
-          self-hosted: false
-          jwt-issuer: ${{ secrets.FIREFOX_JWT_ISSUER }}
-          jwt-secret: ${{ secrets.FIREFOX_JWT_SECRET }}
+      - name: Commit version update
+        run: |
+          git fetch origin main
+          git checkout main
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add package.json src/manifest.json
+          git commit -m "Update version to ${{ env.TAG }}"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
