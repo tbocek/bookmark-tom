@@ -7,7 +7,8 @@
   "scripts": {
     "lint": "npx web-ext lint --source-dir src",
     "build": "npx web-ext build --source-dir src --overwrite-dest",
-    "clean": "rm -rf node_modules; rm -rf web-ext-artifacts; rm src/.amo-upload-uuid"
+    "clean": "rm -rf node_modules; rm -rf web-ext-artifacts; rm src/.amo-upload-uuid",
+    "patch": "[ -z \"$(git status --porcelain)\" ] && git tag $(jq -r '.version' src/manifest.json | xargs semver -i patch) && git push origin main --tags"
   },
   "devDependencies": {
     "web-ext": "^8.2.0"
