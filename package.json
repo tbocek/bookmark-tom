@@ -13,6 +13,7 @@
     "minor": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i minor) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'"
   },
   "devDependencies": {
-    "web-ext": "^8.2.0"
+    "web-ext": "^8.2.0",
+    "semver": "^7.6.2"
   }
 }
