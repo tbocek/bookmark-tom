@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "lint": "npx web-ext lint --source-dir src",
-    "build": "npx web-ext build --source-dir src --overwrite-dest"
+    "build": "npx web-ext build --source-dir src --overwrite-dest",
+    "clean": "rm -rf node_modules; rm -rf web-ext-artifacts; rm src/.amo-upload-uuid"
   },
   "devDependencies": {
     "web-ext": "^8.2.0"
