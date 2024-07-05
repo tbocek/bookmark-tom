@@ -4,8 +4,8 @@
   "version": "1.0.4",
   "description": "A bookmark extension that syncs the bookmarks via WebDAV, for example with NextCloud.",
   "icons": {
-    "48": "icons/logo.svg",
-    "96": "icons/logo.svg"
+    "48": "icons/logo-48.png",
+    "96": "icons/logo-96.png"
   },
   "permissions": [
     "bookmarks",
