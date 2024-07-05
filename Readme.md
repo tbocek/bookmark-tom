@@ -4,7 +4,7 @@ What: Tom's Bookmark Saver is a browser extension designed to synchronize bookma
 
 Why: Since I have multiple machines which are synchronized with Nextcloud, I also wanted a simple solution for syncing bookmarks. Unfortunately, the export/import feature of Firefox creates files with a new timestamp, so I ended up with a lot of conflicts. Another option is to use FireFox sync, requiring yet another account, or alternatively [self-host](https://github.com/mozilla-services/syncstorage-rs) it. Both options are not optimal and I wanted to have something that works with my existing setup. Since I could not find anything, I built it.
 
-How: Plain Javascript/HTML/CSS with ~500 lines of code.
+How: Plain Javascript/HTML/CSS with ~700 lines of code.
 
 ## User Setup
 To install the extension, follow these steps:

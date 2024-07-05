@@ -6,33 +6,28 @@
 </head>
 <body>
 <h1>Configure WebDAV</h1>
-<div class="input-group">
-    <label for="webdav-url">WebDAV URL:</label>
-    <span class="info-icon" data-tooltip="The URL of your WebDAV server."><img src="../icons/info.svg" ></span>
-</div>
+<label for="webdav-url">WebDAV URL - (the URL of your WebDAV server, e.g. Nextcloud)</label>
 <input type="text" id="webdav-url"><br>
-<div class="input-group">
-    <label for="username">Username:</label>
-    <span class="info-icon" data-tooltip="Your WebDAV username."><img src="../icons/info.svg" ></span>
-</div>
+<label for="username">Username</label>
 <input type="text" id="username"><br>
-<div class="input-group">
-    <label for="password">Password:</label>
-    <span class="info-icon" data-tooltip="Your WebDAV password."><img src="../icons/info.svg" ></span>
-</div>
-<input type="password" id="password"><br>
-<div class="input-group">
-    <label for="checkInterval">Check Interval (in minutes):</label>
-    <span class="info-icon" data-tooltip="The interval (in minutes) to get incoming changes."><img src="../icons/info.svg" ></span>
-</div>
-<input type="text" id="checkInterval"><br>
+<label for="password">Password</label>
+<input type="password" id="password">
+<label for="checkIntervalMinutes">Check WebDAV Interval (in minutes)</label>
+<input type="text" id="checkIntervalMinutes">
+<p>(Attention: the downloaded config will contain your password in clear text)</p>
 <div class="container">
     <button id="save-button">
-        <span class="button-text">Save Configuration</span>
+        <span class="button-text">Save</span>
     </button>
     <button id="test-button">
-        <span class="button-text">Test Connection</span>
+        <span class="button-text">Test</span>
         <div id="spinner" class="spinner" style="visibility:hidden;"></div>
+    </button>
+    <button id="save-config-button">
+        <span class="button-text-black">Download Config</span>
+    </button>
+    <button id="load-config-button">
+        <span class="button-text-black">Load Config</span>
     </button>
 </div>
 <div id="status">&nbsp;</div>

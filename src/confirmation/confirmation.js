@@ -6,8 +6,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     const deletionsDiv = document.getElementById('deletions');
     const updatesDiv = document.getElementById('updates');
 
-    const cloudToMachineSVG = 'icons/cloud2machine.svg';
-    const machineToCloudSVG = 'icons/machine2cloud.svg';
+    const cloudToMachineSVG = '../icons/cloud2machine.svg';
+    const machineToCloudSVG = '../icons/machine2cloud.svg';
 
     function createListItem(bookmark) {
         const li = document.createElement('li');
@@ -54,30 +54,46 @@ document.addEventListener('DOMContentLoaded', async function () {
         return section;
     }
 
+    let diffShown = false;
     if (insertions && insertions.length > 0) {
-        const section = createSection(`Insert (${action}):`, cloudToMachineSVG, insertions);
+        const section = createSection(`Insert (${action}):`, action === "Local Update" ? cloudToMachineSVG: machineToCloudSVG, insertions);
         insertionsDiv.appendChild(section);
+        diffShown = true;
+    } else {
+        insertionsDiv.remove();
     }
 
     if (deletions && deletions.length > 0) {
-        const section = createSection(`Delete (${action}):`, machineToCloudSVG, deletions);
+        const section = createSection(`Delete (${action}):`, action === "Local Update" ? cloudToMachineSVG: machineToCloudSVG, deletions);
         deletionsDiv.appendChild(section);
+        diffShown = true;
+    } else {
+        deletionsDiv.remove();
     }
 
+    let updateDiffShown = false;
     if (updateUrls && updateUrls.length > 0) {
-        const section = createSection(`Updated URL (${action}):`, machineToCloudSVG, updateUrls);
+        const section = createSection(`Updated URL (${action}):`, action === "Local Update" ? cloudToMachineSVG: machineToCloudSVG, updateUrls);
         updatesDiv.appendChild(section);
+        diffShown = true;
+        updateDiffShown=true;
     }
 
     if (updateTitles && updateTitles.length > 0) {
-        const section = createSection(`Update Title (${action}):`, machineToCloudSVG, updateTitles);
+        const section = createSection(`Update Title (${action}):`, action === "Local Update" ? cloudToMachineSVG: machineToCloudSVG, updateTitles);
         updatesDiv.appendChild(section);
+        diffShown = true;
+        updateDiffShown=true;
     }
 
-    if (updateIndexes && updateIndexes.length > 0) {
+    if (!diffShown && updateIndexes && updateIndexes.length > 0) {
         const h2 = document.createElement('h2');
         h2.textContent = `Fix Index - ${updateIndexes.length} (${action})`;
         updatesDiv.appendChild(h2);
+        updateDiffShown=true;
+    }
+    if(!updateDiffShown) {
+        updatesDiv.remove();
     }
 
     const mergeBtn = document.getElementById('confirm-merge');

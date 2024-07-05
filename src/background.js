@@ -1,22 +1,14 @@
-//************************** AUTH **************************
-// Function to intercept and modify outgoing requests for authentication
-async function addAuthHeader(details) {
-    const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
-    const username = config.webdavUsername;
-    const password = config.webdavPassword;
-
-    const isExtensionRequest = details.requestHeaders.some(
-        header => header.name.toLowerCase() === 'x-extension-request' && header.value === 'bookmark'
-    );
-
-    if (isExtensionRequest) {
-        details.requestHeaders.push({name: 'Authorization', value: 'Basic ' + btoa(username + ":" + password)});
-        details.requestHeaders.push({name: 'User-Agent', value: 'Mozilla/5.0 (Android) Nextcloud-android'});
-        details.requestHeaders = details.requestHeaders.filter(header => header.name.toLowerCase() !== 'sec-fetch-mode');
-        details.requestHeaders = details.requestHeaders.filter(header => header.name.toLowerCase() !== 'cookie');
-        details.requestHeaders = details.requestHeaders.filter(header => header.name.toLowerCase() !== 'x-extension-request');
+//************************** HELPER **************************
+function arraysEqual(arr1, arr2) {
+    if (arr1.length !== arr2.length) {
+        return false;
     }
-    return { requestHeaders: details.requestHeaders };
+    for (let i = 0; i < arr1.length; i++) {
+        if (arr1[i] !== arr2[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 //************************** WEBDAV **************************
@@ -87,28 +79,17 @@ async function fetchBookmarksLocal(bookmarks, parentPathArray = []) {
     return results;
 }
 
-// Helper function to compare two arrays
-function arraysEqual(arr1, arr2) {
-    if (arr1.length !== arr2.length) {
-        return false;
-    }
-    for (let i = 0; i < arr1.length; i++) {
-        if (arr1[i] !== arr2[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
 async function findBookmarkId(url, title, index, pathArray) {
     let searchResults;
 
     // If a URL is provided, search by URL
     if (url) {
         searchResults = await browser.bookmarks.search({ url });
-    } else {
+    } else if(title) {
         // If no URL is provided, search by title
         searchResults = await browser.bookmarks.search({ title });
+    } else {
+        throw new Error(`No bookmark found for ${url}/${title}`);
     }
 
     for (const bookmark of searchResults) {
@@ -271,7 +252,7 @@ async function closeWindow() {
 
 //************************** MAIN LOGIC **************************
 // Function to get all bookmarks and store them in local storage
-async function syncAllBookmarks(localMaster) {
+async function syncAllBookmarks(localMaster, fromBackgroundTimer) {
     const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
     const url = config.webdavUrl;
     const username = config.webdavUsername;
@@ -309,7 +290,27 @@ async function syncAllBookmarks(localMaster) {
         return;
     }
 
-    if(localMaster || !remoteBookmarks) {
+    if(fromBackgroundTimer) {
+        browser.notifications.create({
+            "type": "basic",
+            "iconUrl": browser.runtime.getURL("icons/logo.svg"),
+            "title": "Incoming Bookmark Changes",
+            "message": "Open Sync Tab?",
+            "priority": 2
+        });
+
+        browser.notifications.onClicked.addListener(async (notificationId) => {
+            // OK button clicked
+            if(localMaster || !remoteBookmarks) {
+                const changes = getBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+                await openConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+            } else {
+                const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+                await openConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
+            }
+            browser.notifications.clear(notificationId);
+        });
+    } else if(localMaster || !remoteBookmarks) {
         const changes = getBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
         await openConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
     } else {
@@ -449,22 +450,22 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
 }
 
 (async () => {
-    const config = await browser.storage.sync.get(['webdavUrl']);
+    const config = await browser.storage.sync.get(['webdavUrl', 'checkIntervalMinutes']);
     const url = config.webdavUrl;
+    const checkIntervalMinutes = config.checkIntervalMinutes;
     if(!url) {
         throw new Error("URL not set!");
     }
-    // Add listener to modify request headers
-    browser.webRequest.onBeforeSendHeaders.addListener(
-        addAuthHeader,
-        { urls: [url] },
-        ["blocking", "requestHeaders"]
-    );
 
-    await syncAllBookmarks(false); //sync on startup
+    let checkInterval = parseInt(checkIntervalMinutes);
+    if (isNaN(checkInterval)) {
+        throw new Error("Invalid check interval. Please enter a number.");
+    }
+
+    await syncAllBookmarks(false, true); //sync on startup
     setInterval(async () => {
-        await syncAllBookmarks(false); //sync every x minutes
-    }, 600000);
+        await syncAllBookmarks(false, true); //sync every x minutes
+    }, checkInterval * 60 * 1000);
 })();
 
 let debounceTimer;
@@ -479,7 +480,7 @@ async function debounceSync(localMaster, localDelete) {
     }
 
     debounceTimer = setTimeout(async () => {
-        await syncAllBookmarks(localMaster);
+        await syncAllBookmarks(localMaster, false);
         isLocalDelete = false;
     }, 1000);
 }

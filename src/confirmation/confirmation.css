@@ -77,7 +77,7 @@ button {
 }
 .content-div {
     display: inline-block;
-    width: 50em; /* Fixed width for all content divs */
+    width: 40em; /* Fixed width for all content divs */
     text-align: left; /* Ensure content is left-aligned within the div */
     margin-bottom: 20px; /* Add some space between the content sections */
 }
