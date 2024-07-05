@@ -252,25 +252,7 @@ async function closeWindow() {
 
 //************************** MAIN LOGIC **************************
 // Function to get all bookmarks and store them in local storage
-async function syncAllBookmarks(localMaster, fromBackgroundTimer) {
-    const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
-    const url = config.webdavUrl;
-    const username = config.webdavUsername;
-    const password = config.webdavPassword;
-
-    if(!url) {
-        await browser.storage.local.set({ message: `URL not set!`});
-        throw new Error("URL not set!");
-    }
-    if(!username) {
-        await browser.storage.local.set({ message: `username not set!`});
-        throw new Error("username not set!");
-    }
-    if(!password) {
-        await browser.storage.local.set({ message: `password not set!`});
-        throw new Error("password not set!");
-    }
-
+async function syncAllBookmarks(url, username, password, localMaster, fromBackgroundTimer) {
     const bookmarkTreeNodes = await browser.bookmarks.getTree()
     const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
     let remoteBookmarks;
@@ -449,23 +431,45 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
     return false;
 }
 
-(async () => {
-    const config = await browser.storage.sync.get(['webdavUrl', 'checkIntervalMinutes']);
+async function readConfig()  {
+    const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword', 'checkIntervalMinutes']);
     const url = config.webdavUrl;
+    const username = config.webdavUsername;
+    const password = config.webdavPassword;
     const checkIntervalMinutes = config.checkIntervalMinutes;
+
     if(!url) {
+        await browser.storage.local.set({ message: `URL not set!`});
         throw new Error("URL not set!");
+    }
+    if(!username) {
+        await browser.storage.local.set({ message: `username not set!`});
+        throw new Error("username not set!");
+    }
+    if(!password) {
+        await browser.storage.local.set({ message: `password not set!`});
+        throw new Error("password not set!");
     }
 
     let checkInterval = parseInt(checkIntervalMinutes);
     if (isNaN(checkInterval)) {
-        throw new Error("Invalid check interval. Please enter a number.");
+        await browser.storage.local.set({ message: `invalid check interval. Please enter a number.`});
+        throw new Error("invalid check interval. Please enter a number.");
     }
 
-    await syncAllBookmarks(false, true); //sync on startup
-    setInterval(async () => {
-        await syncAllBookmarks(false, true); //sync every x minutes
-    }, checkInterval * 60 * 1000);
+    return {url, username, password, checkInterval}
+}
+
+(async () => {
+    try {
+        const {url, username, password, checkInterval} = await readConfig();
+        await syncAllBookmarks(url, username, password, false, true); //sync on startup
+        setInterval(async () => {
+            await syncAllBookmarks(url, username, password, false, true); //sync every x minutes
+        }, checkInterval * 60 * 1000);
+    } catch (error) {
+        await browser.storage.local.set({ message: error});
+    }
 })();
 
 let debounceTimer;
@@ -479,8 +483,10 @@ async function debounceSync(localMaster, localDelete) {
         isLocalDelete = true;
     }
 
+    const {url, username, password} = await readConfig();
+
     debounceTimer = setTimeout(async () => {
-        await syncAllBookmarks(localMaster, false);
+        await syncAllBookmarks(url, username, password, localMaster, false);
         isLocalDelete = false;
     }, 1000);
 }
@@ -533,13 +539,15 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             await closeWindow();
         } else if (message.command === "syncAllBookmarks") {
             try {
-                await debounceSync(false, false);
+                const {url, username, password} = await readConfig();
+                await syncAllBookmarks(url, username, password, false, false);
                 sendResponse({success: true});
             } catch (error) {
                 sendResponse({success: false, error: error});
             }
+            return true;  // Keep the message channel open for sendResponse
         }
-        return true;  // Keep the message channel open for sendResponse
+
     } catch (error) {
         console.error("Error in updating", error);
     }
