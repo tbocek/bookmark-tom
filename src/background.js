@@ -305,107 +305,167 @@ function getBookmarkChanges(otherBookmarks, myBookmarks) {
     const myBookmarksMap = new Map();
     const otherBookmarksMap = new Map();
 
-    // Populate maps and check for duplicates in oldBookmarks
+    // Populate maps and check for duplicates in myBookmarks
     const deletions = [];
     myBookmarks.forEach(myBookmark => {
-        const key = myBookmark.url + myBookmark.path.join('/') + myBookmark.title + myBookmark.index;
+        const key = myBookmark.title + '#' + myBookmark.index + '#' + myBookmark.path.join('/') + '#' + myBookmark.url;
         if (myBookmarksMap.has(key)) {
-            // Track duplicates in oldBookmarks for deletion
+            // Track duplicates in myBookmarks for deletion
             deletions.push(myBookmark);
         } else {
             myBookmarksMap.set(key, myBookmark);
         }
     });
 
-    // Populate maps and check for duplicates in mainBookmarks
+    // Populate maps and check for duplicates in otherBookmarks
     const insertions = [];
     otherBookmarks.forEach(otherBookmark => {
-        const key = otherBookmark.url + otherBookmark.path.join('/') + otherBookmark.title + otherBookmark.index;
+        const key = otherBookmark.title + '#' + otherBookmark.index + '#' + otherBookmark.path.join('/') + '#' + otherBookmark.url;
         if (otherBookmarksMap.has(key)) {
-            // Track duplicates in mainBookmarks for deletion
+            // Track duplicates in otherBookmarks for deletion
             insertions.push(otherBookmark);
         } else {
             otherBookmarksMap.set(key, otherBookmark);
         }
     });
 
-    // Identify insertions: bookmarks in mainBookmarks not present in oldBookmarks
-    otherBookmarksMap.forEach((mainBookmark, key) => {
+    // Identify insertions: bookmarks in otherBookmarks not present in myBookmarks
+    otherBookmarksMap.forEach((otherBookmark, key) => {
         if (!myBookmarksMap.has(key)) {
-            insertions.push(mainBookmark);
+            insertions.push(otherBookmark);
         }
     });
 
-    // Identify deletions: bookmarks in oldBookmarks not present in mainBookmarks
-    myBookmarksMap.forEach((oldBookmark, key) => {
+    // Identify deletions: bookmarks in myBookmarks not present in otherBookmarks
+    myBookmarksMap.forEach((myBookmark, key) => {
         if (!otherBookmarksMap.has(key)) {
-            deletions.push(oldBookmark);
+            deletions.push(myBookmark);
         }
     });
 
     const updateUrls = [];
     const updateTitles = [];
     const updateIndexes = [];
+    const updatePaths = [];
 
     // Create a map from delBookmarks for quick lookup
-    const delMapUrl = new Map();
-    const delMapTitle = new Map();
-    const delMapIndex = new Map();
+    const mapUrl = new Map();
+    const mapTitle = new Map();
+    const mapPath = new Map();
+    const mapIndex = new Map();
+
+    const mapTitleFolder = new Map();
+    const mapPathFolder = new Map();
+    const mapIndexFolder = new Map();
+
     deletions.forEach(bookmark => {
-        const keyUrl = bookmark.title + bookmark.path.join('/') + bookmark.index;
-        delMapUrl.set(keyUrl, bookmark);
 
-        let keyTitle;
         if(bookmark.url) {
-            keyTitle = bookmark.url + bookmark.path.join('/') + bookmark.index;
-        } else {
-            keyTitle = bookmark.path.join('/') + bookmark.title;
-        }
-        delMapTitle.set(keyTitle, bookmark);
+            //here we have a regular entry
+            //we have: title, index, path, url
+            const keyUpdateUrl = bookmark.title + '#' + bookmark.index + '#' + bookmark.path.join('/');
+            const keyUpdateTitle = bookmark.index + '#' + bookmark.path.join('/') + '#' + bookmark.url;
+            const keyUpdatePath = bookmark.title + '#' + bookmark.index + '#' +  bookmark.url;
+            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/') + '#' + bookmark.url;
 
-        const keyIndex = bookmark.title + bookmark.path.join('/') + bookmark.url;
-        delMapIndex.set(keyIndex, bookmark);
+            mapUrl.set(keyUpdateUrl, bookmark);
+            mapTitle.set(keyUpdateTitle, bookmark);
+            mapPath.set(keyUpdatePath, bookmark);
+            mapIndex.set(keyUpdateIndex, bookmark);
+        } else {
+            //here we have a folder entry
+            //we have: title, index, path
+            const keyUpdateTitle = bookmark.index + '#' + bookmark.path.join('/');
+            const keyUpdatePath = bookmark.title + '#' + bookmark.index;
+            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/');
+
+            mapTitleFolder.set(keyUpdateTitle, bookmark);
+            mapPathFolder.set(keyUpdatePath, bookmark);
+            mapIndexFolder.set(keyUpdateIndex, bookmark);
+        }
     });
 
     // Iterate over insBookmarks to find matching entries in delBookmarks with different indexes
     for (let i = insertions.length - 1; i >= 0; i--) {
         const insBookmark = insertions[i];
-        const keyUrl = insBookmark.title + insBookmark.path.join('/') + insBookmark.index;
-        let keyTitle;
         if(insBookmark.url) {
-            keyTitle = insBookmark.url + insBookmark.path.join('/') + insBookmark.index;
+            //here we have a regular entry
+            //we have: title, index, path, url
+            const keyUpdateUrl = insBookmark.title + '#' + insBookmark.index + '#' + insBookmark.path.join('/');
+            const keyUpdateTitle = insBookmark.index + '#' + insBookmark.path.join('/') + '#' + insBookmark.url;
+            const keyUpdatePath = insBookmark.title + '#' + insBookmark.index + '#' +  insBookmark.url;
+            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/') + '#' + insBookmark.url;
+
+            if (mapUrl.has(keyUpdateUrl)) {
+                const delBookmark = mapUrl.get(keyUpdateUrl);
+                if (delBookmark) {
+                    updateUrls.push({...insBookmark, oldUrl: delBookmark.url});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            } else if (mapTitle.has(keyUpdateTitle)) {
+                const delBookmark = mapTitle.get(keyUpdateTitle);
+                if (delBookmark) {
+                    updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            } else if (mapPath.has(keyUpdatePath)) {
+                const delBookmark = mapPath.get(keyUpdatePath);
+                if (delBookmark) {
+                    updatePaths.push({...insBookmark, oldPath: delBookmark.path});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            } else if (mapIndex.has(keyUpdateIndex)) {
+                const delBookmark = mapIndex.get(keyUpdateIndex);
+                if (delBookmark) {
+                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            }
+
         } else {
-            keyTitle = insBookmark.path.join('/') + insBookmark.title;
-        }
-        const keyIndex = insBookmark.title + insBookmark.path.join('/') + insBookmark.url;
-        if (delMapIndex.has(keyIndex)) {
-            const delBookmark = delMapIndex.get(keyIndex);
-            if (delBookmark) {
-                updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
-                // Remove the entries from both delBookmarks and insBookmarks
-                deletions.splice(deletions.indexOf(delBookmark), 1);
-                insertions.splice(i, 1);
-            }
-        } else if (delMapTitle.has(keyTitle)) {
-            const delBookmark = delMapTitle.get(keyTitle);
-            if (delBookmark) {
-                updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
-                // Remove the entries from both delBookmarks and insBookmarks
-                deletions.splice(deletions.indexOf(delBookmark), 1);
-                insertions.splice(i, 1);
-            }
-        } else if (delMapUrl.has(keyUrl)) {
-            const delBookmark = delMapUrl.get(keyUrl);
-            if (delBookmark) {
-                updateUrls.push({...insBookmark, oldUrl: delBookmark.url});
-                // Remove the entries from both delBookmarks and insBookmarks
-                deletions.splice(deletions.indexOf(delBookmark), 1);
-                insertions.splice(i, 1);
+            //here we have a folder entry
+            //we have: title, index, path
+            const keyUpdateTitle = insBookmark.index + '#' + insBookmark.path.join('/');
+            const keyUpdatePath = insBookmark.title + '#' + insBookmark.index;
+            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/');
+
+            if (mapTitleFolder.has(keyUpdateTitle)) {
+                const delBookmark = mapTitleFolder.get(keyUpdateTitle);
+                if (delBookmark) {
+                    updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            } else if (mapPathFolder.has(keyUpdatePath)) {
+                const delBookmark = mapPathFolder.get(keyUpdatePath);
+                if (delBookmark) {
+                    updatePaths.push({...insBookmark, oldPath: delBookmark.path});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            } else if (mapIndexFolder.has(keyUpdateIndex)) {
+                const delBookmark = mapIndexFolder.get(keyUpdateIndex);
+                if (delBookmark) {
+                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
             }
         }
     }
 
-    return { insertions, deletions, updateUrls, updateTitles, updateIndexes};
+    return {insertions, deletions, updateUrls, updateTitles, updateIndexes, updatePaths};
 }
 
 // Function to compare bookmarks
