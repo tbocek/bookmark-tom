@@ -4,16 +4,21 @@
   "repository": "https://github.com/tbocek/bookmark-tom.git",
   "author": "Thomas Bocek <tom.bookmark@bocek.ch>",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "lint": "npx web-ext lint --source-dir src",
     "build": "npx web-ext build --source-dir src --overwrite-dest",
     "clean": "rm -rf node_modules; rm -rf web-ext-artifacts; rm src/.amo-upload-uuid",
     "reset-tags": "git tag -l | xargs git tag -d; git fetch --tags",
     "patch": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i patch) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'",
-    "minor": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i minor) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'"
+    "minor": "sh -c '[ -z \"$(git status --porcelain)\" ] && { git tag $(jq -r \".version\" src/manifest.json | xargs npx semver -i minor) && git push origin main --tags; } || echo \"There are pending changes in the working directory. Please commit or stash them first.\"'",
+    "test": "npx mocha --require test/setup.js test/unit/*.js"
   },
   "devDependencies": {
     "web-ext": "^8.2.0",
-    "semver": "^7.6.2"
+    "semver": "^7.6.3",
+    "mocha": "^10.7.0",
+    "sinon": "^18.0.0",
+    "chai": "^5.1.1"
   }
 }

@@ -301,44 +301,44 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
     }
 }
 
-function getBookmarkChanges(mainBookmarks, oldBookmarks) {
-    const oldBookmarksMap = new Map();
-    const mainBookmarksMap = new Map();
+function getBookmarkChanges(otherBookmarks, myBookmarks) {
+    const myBookmarksMap = new Map();
+    const otherBookmarksMap = new Map();
 
     // Populate maps and check for duplicates in oldBookmarks
     const deletions = [];
-    oldBookmarks.forEach(oldBookmark => {
-        const key = oldBookmark.url + oldBookmark.path.join('/') + oldBookmark.title + oldBookmark.index;
-        if (oldBookmarksMap.has(key)) {
+    myBookmarks.forEach(myBookmark => {
+        const key = myBookmark.url + myBookmark.path.join('/') + myBookmark.title + myBookmark.index;
+        if (myBookmarksMap.has(key)) {
             // Track duplicates in oldBookmarks for deletion
-            deletions.push(oldBookmark);
+            deletions.push(myBookmark);
         } else {
-            oldBookmarksMap.set(key, oldBookmark);
+            myBookmarksMap.set(key, myBookmark);
         }
     });
 
     // Populate maps and check for duplicates in mainBookmarks
     const insertions = [];
-    mainBookmarks.forEach(mainBookmark => {
-        const key = mainBookmark.url + mainBookmark.path.join('/') + mainBookmark.title + mainBookmark.index;
-        if (mainBookmarksMap.has(key)) {
+    otherBookmarks.forEach(otherBookmark => {
+        const key = otherBookmark.url + otherBookmark.path.join('/') + otherBookmark.title + otherBookmark.index;
+        if (otherBookmarksMap.has(key)) {
             // Track duplicates in mainBookmarks for deletion
-            insertions.push(mainBookmark);
+            insertions.push(otherBookmark);
         } else {
-            mainBookmarksMap.set(key, mainBookmark);
+            otherBookmarksMap.set(key, otherBookmark);
         }
     });
 
     // Identify insertions: bookmarks in mainBookmarks not present in oldBookmarks
-    mainBookmarksMap.forEach((mainBookmark, key) => {
-        if (!oldBookmarksMap.has(key)) {
+    otherBookmarksMap.forEach((mainBookmark, key) => {
+        if (!myBookmarksMap.has(key)) {
             insertions.push(mainBookmark);
         }
     });
 
     // Identify deletions: bookmarks in oldBookmarks not present in mainBookmarks
-    oldBookmarksMap.forEach((oldBookmark, key) => {
-        if (!mainBookmarksMap.has(key)) {
+    myBookmarksMap.forEach((oldBookmark, key) => {
+        if (!otherBookmarksMap.has(key)) {
             deletions.push(oldBookmark);
         }
     });
@@ -552,3 +552,7 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
         console.error("Error in updating", error);
     }
 });
+
+export {
+    getBookmarkChanges
+};
