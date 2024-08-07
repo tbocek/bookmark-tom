@@ -1,5 +1,13 @@
 import { expect } from 'chai';
-import { getBookmarkChanges } from '../../src/background.js';
+//import { calcBookmarkChanges } from '../../src/background.js';
+import fs from 'fs';
+import path from 'path';
+
+const filePath = path.join(process.cwd(), 'src/background.js');
+const code = fs.readFileSync(filePath, 'utf-8');
+const moduleExports = eval(code);
+const calcBookmarkChanges = moduleExports.calcBookmarkChanges;
+
 
 describe('Unit Tests for Bookmark Sync Logic', () => {
     it('should detect an insertion when a bookmark is present in otherBookmarks but not in myBookmarks', () => {
@@ -11,7 +19,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 2', url: 'http://example.com/2', path: ['Folder2'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.deep.equal([{ title: 'Bookmark 2', url: 'http://example.com/2', path: ['Folder2'], index: 1 }]);
         expect(changes.deletions).to.be.empty;
@@ -30,7 +38,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder1'], index: 0 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.deep.equal([{ title: 'Bookmark 2', url: 'http://example.com/2', path: ['Folder2'], index: 1 }]);
@@ -48,7 +56,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.org/1', path: ['Folder1'], index: 0 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -66,7 +74,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Updated Bookmark 1', url: 'http://example.com/1', path: ['Folder1'], index: 0 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -84,7 +92,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder1'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -104,7 +112,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 2', url: 'http://example.com/2', path: ['Folder2'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -122,7 +130,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder2'], index: 0 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -141,7 +149,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder2'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.deep.equal([{ title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder2'], index: 1 }]);
         expect(changes.deletions).to.be.empty;
@@ -161,7 +169,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder2'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -181,7 +189,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 2', url: 'http://example.com/2', path: ['Folder3'], index: 1 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -213,7 +221,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             { title: 'Bookmark 1', url: 'http://example.com/1', path: ['Folder1', 'Subfolder2'], index: 0 }
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -243,7 +251,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             {title:"7-Tage-News | heise online",index:2,path:["Bookmarks Toolbar","News2"],url:"https://www.heise.de/newsticker/"}
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -285,7 +293,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             {title:"7-Tage-News | heise online",index:2,path:["Bookmarks Toolbar","News2"],url:"https://www.heise.de/newsticker/"}
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -313,7 +321,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             {title:"7-Tage-News | heise online",index:2,path:["Bookmarks Toolbar","News3"],url:"https://www.heise.de/newsticker/"}
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.be.empty;
         expect(changes.deletions).to.be.empty;
@@ -355,7 +363,7 @@ describe('Unit Tests for Bookmark Sync Logic', () => {
             {title:"7-Tage-News3 | heise online",index:2,path:["Bookmarks Toolbar","News3"],url:"https://www.heise.de/newsticker/"}
         ];
 
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
 
         expect(changes.insertions).to.deep.equal([
             {title: "Hacker News3", index: 0, path: ["Bookmarks Toolbar", "News3"], url: "https://news.ycombinator.com/"},

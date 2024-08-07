@@ -5,9 +5,10 @@ body {
 }
 h1 {
     font-size: 24px;
-    margin-bottom: 20px;
+    margin-left: 20px;
+}
+.side {
     display: flex;
-    justify-content: center;
     align-items: center;
 }
 h2 {
@@ -68,13 +69,9 @@ button {
 }
 .icon {
     width: 64px;
-    height: 64px;
     margin-left: 10px;
 }
-.logo {
-    display: block;
-    margin: 0 auto 20px; /* Center align logo with margin */
-}
+
 .content-div {
     display: inline-block;
     width: 40em; /* Fixed width for all content divs */

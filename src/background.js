@@ -12,7 +12,7 @@ function arraysEqual(arr1, arr2) {
 }
 
 //************************** WEBDAV **************************
-async function fetchBookmarksFromWebDAV(url, username, password) {
+async function fetchWebDAVBookmarks(url, username, password) {
     const headers = new Headers();
     headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
     headers.set('X-Extension-Request', 'bookmark');
@@ -28,11 +28,21 @@ async function fetchBookmarksFromWebDAV(url, username, password) {
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return await response.json();
+
+    //handle if the file is empty or not an array
+    try {
+        const data = await response.json();
+        if (Array.isArray(data)) {
+            return data;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
 }
 
 // Function to update the WebDAV file
-async function updateWebDAVFile(url, username, password, bookmarks) {
+async function updateWebDAVBookmarks(url, username, password, bookmarks) {
     const headers = new Headers();
     headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
     headers.set('Content-Type', 'application/json');
@@ -44,6 +54,9 @@ async function updateWebDAVFile(url, username, password, bookmarks) {
         credentials: 'omit',
         body: JSON.stringify(bookmarks)
     });
+    if (response.status === 404) { //its empty on the remote site
+        return null;
+    }
 
     if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -51,7 +64,7 @@ async function updateWebDAVFile(url, username, password, bookmarks) {
 }
 //************************** LOCAL BOOKMARKS **************************
 // Function to recursively fetch and structure bookmarks
-async function fetchBookmarksLocal(bookmarks, parentPathArray = []) {
+async function retrieveLocalBookmarks(bookmarks, parentPathArray = []) {
     let results = [];
 
     for (const bookmark of bookmarks) {
@@ -71,7 +84,7 @@ async function fetchBookmarksLocal(bookmarks, parentPathArray = []) {
         if (bookmark.children) {
             const isRoot = bookmark.title === ""
             const childrenPathArray = isRoot ? [] : [...parentPathArray, bookmark.title];
-            const childrenResults = await fetchBookmarksLocal(bookmark.children, childrenPathArray);
+            const childrenResults = await retrieveLocalBookmarks(bookmark.children, childrenPathArray);
             results = results.concat(childrenResults);
         }
     }
@@ -79,7 +92,7 @@ async function fetchBookmarksLocal(bookmarks, parentPathArray = []) {
     return results;
 }
 
-async function findBookmarkId(url, title, index, pathArray) {
+async function locateBookmarkId(url, title, index, pathArray) {
     let searchResults;
 
     // If a URL is provided, search by URL
@@ -116,7 +129,7 @@ async function findBookmarkId(url, title, index, pathArray) {
 }
 
 //Find the Id of the bookmark folder specified in pathArray
-async function findBookmarkFolder(pathArray) {
+async function locateParentId(pathArray) {
     const bookmarkTree = await browser.bookmarks.getTree();
 
     function searchTree(nodes, pathParts) {
@@ -143,19 +156,19 @@ async function findBookmarkFolder(pathArray) {
     return searchTree(bookmarkTree[0].children, pathArray);
 }
 
-async function updateLocalBookmarksInsDel(delBookmarks, insBookmarks) {
+async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
     try {
         // Delete bookmarks
         for (let i = delBookmarks.length - 1; i >= 0; i--) {
             const delBookmark = delBookmarks[i];
-            const id = await findBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
+            const id = await locateBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
             if (id) {
                 await browser.bookmarks.remove(id);
             }
         }
         // Insert bookmarks
         for (const insBookmark of insBookmarks) {
-            const parentId = await findBookmarkFolder(insBookmark.path);
+            const parentId = await locateParentId(insBookmark.path);
             if (parentId) {
                 await browser.bookmarks.create({
                     parentId,
@@ -169,27 +182,35 @@ async function updateLocalBookmarksInsDel(delBookmarks, insBookmarks) {
         console.error('Error updating bookmarks:', error);
     }
 }
-async function updateLocalBookmarksUpdate(upBookmarksUrls, upBookmarksTitles, upBookmarksIndexes) {
+async function applyLocalBookmarkUpdates(upBookmarksUrls, upBookmarksTitles, upBookmarksIndexes, upBookmarksPaths) {
     try {
         // Update Bookmarks
         for (const upBookmarksUrl of upBookmarksUrls) {
-            const id = await findBookmarkId(upBookmarksUrl.oldUrl, upBookmarksUrl.title, null, upBookmarksUrl.path);
+            const id = await locateBookmarkId(upBookmarksUrl.oldUrl, upBookmarksUrl.title, null, upBookmarksUrl.path);
             if (id) {
                 await browser.bookmarks.update(id, {url: upBookmarksUrl.url});
             }
         }
         for (const upBookmarksTitle of upBookmarksTitles) {
-            const id = await findBookmarkId(upBookmarksTitle.url, upBookmarksTitle.oldTitle, null, upBookmarksTitle.path);
+            const id = await locateBookmarkId(upBookmarksTitle.url, upBookmarksTitle.oldTitle, null, upBookmarksTitle.path);
             if (id) {
                 await browser.bookmarks.update(id, {title: upBookmarksTitle.title});
             }
         }
         for (const upBookmarksIndex of upBookmarksIndexes) {
-            const id = await findBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
+            const id = await locateBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
             if (id) {
                 await browser.bookmarks.move(id, {index: upBookmarksIndex.index});
             }
         }
+        for (const upBookmarksPath of upBookmarksPaths) {
+            const id = await locateBookmarkId(upBookmarksPath.url, upBookmarksPath.title, null, upBookmarksPath.oldPath);
+            const parentId = await locateParentId(upBookmarksPath.path)
+            if (id) {
+                await browser.bookmarks.move(id, {parentId: parentId, index: upBookmarksPath.index});
+            }
+        }
+
     } catch (error) {
         console.error('Error updating bookmarks:', error);
     }
@@ -198,8 +219,8 @@ async function updateLocalBookmarksUpdate(upBookmarksUrls, upBookmarksTitles, up
 //************************** NOTIFICATION ************************
 let previousTabId;
 let confirmationTabId = null;
-async function openConfirmationPage(changes, action, localBookmarks, remoteBookmarks) {
-    const { insertions, deletions, updateUrls, updateTitles, updateIndexes } = changes;
+async function displayConfirmationPage(changes, action, localBookmarks, remoteBookmarks) {
+    const { insertions, deletions, updateUrls, updateTitles, updateIndexes, updatePaths } = changes;
 
     // Store changes and context in the browser's local storage
     browser.storage.local.set({
@@ -208,6 +229,7 @@ async function openConfirmationPage(changes, action, localBookmarks, remoteBookm
         updateUrls: updateUrls,
         updateTitles: updateTitles,
         updateIndexes: updateIndexes,
+        updatePaths: updatePaths,
         action: action,
         localBookmarks: localBookmarks,
         remoteBookmarks: remoteBookmarks
@@ -234,7 +256,7 @@ async function openConfirmationPage(changes, action, localBookmarks, remoteBookm
     confirmationTabId = newTab.id;
 }
 
-async function closeWindow() {
+async function closeConfirmationWindow() {
     const [confirmationTab] = await browser.tabs.query({ url: browser.runtime.getURL('confirmation/confirmation.html') });
     if (confirmationTab) {
         await browser.tabs.remove(confirmationTab.id);
@@ -254,13 +276,18 @@ async function closeWindow() {
 // Function to get all bookmarks and store them in local storage
 async function syncAllBookmarks(url, username, password, localMaster, fromBackgroundTimer) {
     const bookmarkTreeNodes = await browser.bookmarks.getTree()
-    const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
+    const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
     let remoteBookmarks;
     try {
-        remoteBookmarks = await fetchBookmarksFromWebDAV(url,username,password);
+        remoteBookmarks = await fetchWebDAVBookmarks(url,username,password);
     } catch (error) {
+        console.error(error);
         await browser.storage.local.set({ message: `Error fetching bookmarks: ${error}`});
-        throw error
+        return;
+    }
+
+    if (remoteBookmarks === null) {
+        await browser.storage.local.set({ message: `Remote file not found: ${url}. Change URL or create an empty file.`});
     }
 
     // Store when last synced
@@ -268,7 +295,7 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
     const currentTime = new Date().toLocaleDateString('de-DE', options)
     await browser.storage.local.set({ message: `Last sync: ${currentTime}`});
 
-    if(!bookmarksChanged(remoteBookmarks, localBookmarks)) {
+    if(!isBookmarksChanged(remoteBookmarks, localBookmarks)) {
         return;
     }
 
@@ -283,25 +310,29 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
 
         browser.notifications.onClicked.addListener(async (notificationId) => {
             // OK button clicked
-            if(localMaster || !remoteBookmarks) {
-                const changes = getBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
-                await openConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
-            } else {
-                const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-                await openConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
+            try {
+                if(localMaster || !remoteBookmarks) {
+                    const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+                    await displayConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+                } else {
+                    const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+                    await displayConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
+                }
+                browser.notifications.clear(notificationId);
+            } catch (e) {
+                console.error(e);
             }
-            browser.notifications.clear(notificationId);
         });
     } else if(localMaster || !remoteBookmarks) {
-        const changes = getBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
-        await openConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+        const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+        await displayConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
     } else {
-        const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-        await openConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
+        const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+        await displayConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
     }
 }
 
-function getBookmarkChanges(otherBookmarks, myBookmarks) {
+function calcBookmarkChanges(otherBookmarks, myBookmarks) {
     const myBookmarksMap = new Map();
     const otherBookmarksMap = new Map();
 
@@ -469,7 +500,7 @@ function getBookmarkChanges(otherBookmarks, myBookmarks) {
 }
 
 // Function to compare bookmarks
-function bookmarksChanged(mainBookmarks, oldBookmarks) {
+function isBookmarksChanged(mainBookmarks, oldBookmarks) {
     if(mainBookmarks === null && oldBookmarks.length > 0) {
         return true;
     }
@@ -491,7 +522,7 @@ function bookmarksChanged(mainBookmarks, oldBookmarks) {
     return false;
 }
 
-async function readConfig()  {
+async function loadConfig()  {
     const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword', 'checkIntervalMinutes']);
     const url = config.webdavUrl;
     const username = config.webdavUsername;
@@ -522,7 +553,7 @@ async function readConfig()  {
 
 (async () => {
     try {
-        const {url, username, password, checkInterval} = await readConfig();
+        const {url, username, password, checkInterval} = await loadConfig();
         await syncAllBookmarks(url, username, password, false, true); //sync on startup
         setInterval(async () => {
             await syncAllBookmarks(url, username, password, false, true); //sync every x minutes
@@ -535,7 +566,7 @@ async function readConfig()  {
 let debounceTimer;
 let isLocalDelete = false
 
-async function debounceSync(localMaster, localDelete) {
+async function debounceBookmarkSync(localMaster, localDelete) {
     if (debounceTimer) {
         clearTimeout(debounceTimer);
     }
@@ -543,7 +574,7 @@ async function debounceSync(localMaster, localDelete) {
         isLocalDelete = true;
     }
 
-    const {url, username, password} = await readConfig();
+    const {url, username, password} = await loadConfig();
 
     debounceTimer = setTimeout(async () => {
         await syncAllBookmarks(url, username, password, localMaster, false);
@@ -552,17 +583,17 @@ async function debounceSync(localMaster, localDelete) {
 }
 
 // Listen for user changes to bookmarks
-browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-    await debounceSync(true, false);
+browser.bookmarks.onChanged.addListener(async () => {
+    await debounceBookmarkSync(true, false);
 });
-browser.bookmarks.onCreated.addListener(async (id, changeInfo) => {
-    await debounceSync(true,false);
+browser.bookmarks.onCreated.addListener(async () => {
+    await debounceBookmarkSync(true,false);
 });
-browser.bookmarks.onMoved.addListener(async (id, changeInfo) => {
-    await debounceSync(true,true);
+browser.bookmarks.onMoved.addListener(async () => {
+    await debounceBookmarkSync(true,true);
 });
-browser.bookmarks.onRemoved.addListener(async (id, changeInfo) => {
-    await debounceSync(true,true);
+browser.bookmarks.onRemoved.addListener(async () => {
+    await debounceBookmarkSync(true,true);
 });
 
 // Listen for messages to trigger the syncAllBookmarks function
@@ -570,22 +601,25 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
     try {
         if (message.action === 'Local Update') {
             const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
-            await updateLocalBookmarksInsDel(deletions, insertions);
+            await modifyLocalBookmarks(deletions, insertions);
             //Now we need to rescan, as indexes may have shifted
             const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
-            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
-            await closeWindow();
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
+            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+            await applyLocalBookmarkUpdates(changes.updateUrls, changes.updateTitles, changes.updateIndexes, changes.updatePaths);
+            await closeConfirmationWindow();
         } else if (message.action === 'Local Update-merge') {
             const {insertions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'remoteBookmarks']);
-            await updateLocalBookmarksInsDel([], insertions);
+            await modifyLocalBookmarks([], insertions);
             //Now we need to rescan, as indexes may have shifted
             const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await fetchBookmarksLocal(bookmarkTreeNodes);
-            const changes = getBookmarkChanges(remoteBookmarks, localBookmarks);
-            await updateLocalBookmarksUpdate(changes.updateUrls, changes.updateTitles, changes.updateIndexes);
-            await closeWindow();
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
+            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+            await applyLocalBookmarkUpdates(changes.updateUrls, changes.updateTitles, changes.updateIndexes, changes.updatePaths);
+            await closeConfirmationWindow();
+            //since we may have some local changes (merges), try to set local as master and merge
+            const {url, username, password} = await loadConfig();
+            await syncAllBookmarks(url, username, password, true, false);
         }
         else if (message.action === 'Remote Update') {
             const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
@@ -593,26 +627,27 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             const url = config.webdavUrl;
             const username = config.webdavUsername;
             const password = config.webdavPassword;
-            await updateWebDAVFile(url, username, password, localBookmarks);
-            await closeWindow();
+            const response = await updateWebDAVBookmarks(url, username, password, localBookmarks);
+            if(response === null) {
+                await browser.storage.local.set({ message: `Remote file not found: ${url}. Change URL or create an empty file.`});
+            }
+            await closeConfirmationWindow();
         } else if (message.action === 'cancelChanges') {
-            await closeWindow();
+            await closeConfirmationWindow();
         } else if (message.command === "syncAllBookmarks") {
             try {
-                const {url, username, password} = await readConfig();
+                const {url, username, password} = await loadConfig();
                 await syncAllBookmarks(url, username, password, false, false);
                 sendResponse({success: true});
             } catch (error) {
                 sendResponse({success: false, error: error});
             }
-            return true;  // Keep the message channel open for sendResponse
         }
-
     } catch (error) {
         console.error("Error in updating", error);
     }
+    return true; // Keep the message channel open for sendResponse
 });
 
-export {
-    getBookmarkChanges
-};
+//ugly hack so that this function can be called from mocha
+({ calcBookmarkChanges });

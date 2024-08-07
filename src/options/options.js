@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const passwordInput = document.getElementById('password');
     const checkIntervalMinutesInput = document.getElementById('checkIntervalMinutes');
     const statusDiv = document.getElementById('status');
+    const errorDiv = document.getElementById('error');
     const testButton = document.getElementById('test-button');
     const spinner = document.getElementById('spinner');
     const saveConfigButton = document.getElementById('save-config-button');
@@ -42,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function storeConfiguration() {
+        statusDiv.innerText = ''
+
         const webdavUrl = webdavUrlInput.value;
         const username = usernameInput.value;
         const password = passwordInput.value;
@@ -53,24 +56,30 @@ document.addEventListener('DOMContentLoaded', () => {
             webdavPassword: password,
             checkIntervalMinutes: checkIntervalMinutes
         }).then(() => {
-            statusDiv.innerHTML = '<span class="success">Configuration saved.</span>';
+            statusDiv.innerText += 'Configuration saved.';
         });
         return {webdavUrl, username, password}
     }
 
     testButton.addEventListener('click', async () => {
-        const {webdavUrl,username,password} = storeConfiguration();
+        statusDiv.innerText = ''
+
+        const webdavUrl = webdavUrlInput.value;
+        const username = usernameInput.value;
+        const password = passwordInput.value;
 
         try {
             spinner.style.visibility = '';
             const success = await fetchBookmarksFromWebDAV(webdavUrl,username,password);
             if (success) {
-                statusDiv.innerHTML = '<span class="success">&#10004; Connection successful.</span>';
+                storeConfiguration();
+                statusDiv.innerText = 'Connection successfully tested. ';
             } else {
                 throw new Error('Failed to connect to WebDAV server.');
             }
         } catch (error) {
-            statusDiv.textContent = `<span class="error">Error: ${error.message}</span>`;
+            console.error(error);
+            errorDiv.textContent = `Error: ${error.message}`;
         } finally {
             spinner.style.visibility = 'hidden';
         }
@@ -109,7 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 passwordInput.value = config.webdavPassword || '';
                 checkIntervalMinutesInput.value = config.checkIntervalMinutes || '';
                 browser.storage.sync.set(config).then(() => {
-                    statusDiv.innerHTML = '<span class="success">Configuration loaded and saved.</span>';
+                    statusDiv.innerText = 'Configuration loaded and saved.';
                 });
             };
             reader.readAsText(file);
