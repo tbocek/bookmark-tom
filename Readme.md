@@ -102,3 +102,6 @@ Before applying changes, the extension may prompt the user through a confirmatio
 
 ### Event-Driven Sync
 - The extension listens for changes in local bookmarks (e.g., creation, deletion, movement) and can trigger a synchronization process in response.
+
+## Browser Compatibility
+While the extension works with Firefox, it does not work with Fennec / Firefox for Android or Wolvic due to no supporting the [bookmark API](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/bookmarks).
