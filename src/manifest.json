@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Tom's Bookmark Saver",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "A bookmark extension that syncs the bookmarks via WebDAV, for example with NextCloud.",
   "icons": {
     "48": "icons/logo-48.png",
