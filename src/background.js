@@ -220,16 +220,12 @@ async function applyLocalBookmarkUpdates(upBookmarksUrls, upBookmarksTitles, upB
 let previousTabId;
 let confirmationTabId = null;
 async function displayConfirmationPage(changes, action, localBookmarks, remoteBookmarks) {
-    const { insertions, deletions, updateUrls, updateTitles, updateIndexes, updatePaths } = changes;
+    const { insertions, deletions } = changes;
 
     // Store changes and context in the browser's local storage
     browser.storage.local.set({
         insertions: insertions,
         deletions: deletions,
-        updateUrls: updateUrls,
-        updateTitles: updateTitles,
-        updateIndexes: updateIndexes,
-        updatePaths: updatePaths,
         action: action,
         localBookmarks: localBookmarks,
         remoteBookmarks: remoteBookmarks
@@ -268,7 +264,7 @@ async function closeConfirmationWindow() {
     }
 
     // Clear stored data
-    await browser.storage.local.remove(['insertions', 'deletions', 'updateUrls', 'updateTitles', 'updateIndexes', 'action', 'localBookmarks', 'remoteBookmarks']);
+    await browser.storage.local.remove(['insertions', 'deletions', 'action', 'localBookmarks', 'remoteBookmarks']);
     previousTabId = null;
 }
 
@@ -374,131 +370,7 @@ function calcBookmarkChanges(otherBookmarks, myBookmarks) {
         }
     });
 
-    const updateUrls = [];
-    const updateTitles = [];
-    const updateIndexes = [];
-    const updatePaths = [];
-
-    // Create a map from delBookmarks for quick lookup
-    const mapUrl = new Map();
-    const mapTitle = new Map();
-    const mapPath = new Map();
-    const mapIndex = new Map();
-
-    const mapTitleFolder = new Map();
-    const mapPathFolder = new Map();
-    const mapIndexFolder = new Map();
-
-    deletions.forEach(bookmark => {
-
-        if(bookmark.url) {
-            //here we have a regular entry
-            //we have: title, index, path, url
-            const keyUpdateUrl = bookmark.title + '#' + bookmark.index + '#' + bookmark.path.join('/');
-            const keyUpdateTitle = bookmark.index + '#' + bookmark.path.join('/') + '#' + bookmark.url;
-            const keyUpdatePath = bookmark.title + '#' + bookmark.index + '#' +  bookmark.url;
-            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/') + '#' + bookmark.url;
-
-            mapUrl.set(keyUpdateUrl, bookmark);
-            mapTitle.set(keyUpdateTitle, bookmark);
-            mapPath.set(keyUpdatePath, bookmark);
-            mapIndex.set(keyUpdateIndex, bookmark);
-        } else {
-            //here we have a folder entry
-            //we have: title, index, path
-            const keyUpdateTitle = bookmark.index + '#' + bookmark.path.join('/');
-            const keyUpdatePath = bookmark.title + '#' + bookmark.index;
-            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/');
-
-            mapTitleFolder.set(keyUpdateTitle, bookmark);
-            mapPathFolder.set(keyUpdatePath, bookmark);
-            mapIndexFolder.set(keyUpdateIndex, bookmark);
-        }
-    });
-
-    // Iterate over insBookmarks to find matching entries in delBookmarks with different indexes
-    for (let i = insertions.length - 1; i >= 0; i--) {
-        const insBookmark = insertions[i];
-        if(insBookmark.url) {
-            //here we have a regular entry
-            //we have: title, index, path, url
-            const keyUpdateUrl = insBookmark.title + '#' + insBookmark.index + '#' + insBookmark.path.join('/');
-            const keyUpdateTitle = insBookmark.index + '#' + insBookmark.path.join('/') + '#' + insBookmark.url;
-            const keyUpdatePath = insBookmark.title + '#' + insBookmark.index + '#' +  insBookmark.url;
-            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/') + '#' + insBookmark.url;
-
-            //index needs to come first
-            if (mapIndex.has(keyUpdateIndex)) {
-                const delBookmark = mapIndex.get(keyUpdateIndex);
-                if (delBookmark) {
-                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            } else if (mapTitle.has(keyUpdateTitle)) {
-                const delBookmark = mapTitle.get(keyUpdateTitle);
-                if (delBookmark) {
-                    updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            } else if (mapPath.has(keyUpdatePath)) {
-                const delBookmark = mapPath.get(keyUpdatePath);
-                if (delBookmark) {
-                    updatePaths.push({...insBookmark, oldPath: delBookmark.path});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            } else if (mapUrl.has(keyUpdateUrl)) {
-                const delBookmark = mapUrl.get(keyUpdateUrl);
-                if (delBookmark) {
-                    updateUrls.push({...insBookmark, oldUrl: delBookmark.url});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            }
-
-        } else {
-            //here we have a folder entry
-            //we have: title, index, path
-            const keyUpdateTitle = insBookmark.index + '#' + insBookmark.path.join('/');
-            const keyUpdatePath = insBookmark.title + '#' + insBookmark.index;
-            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/');
-
-            //index needs to come first
-            if (mapIndexFolder.has(keyUpdateIndex)) {
-                const delBookmark = mapIndexFolder.get(keyUpdateIndex);
-                if (delBookmark) {
-                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            } else if (mapPathFolder.has(keyUpdatePath)) {
-                const delBookmark = mapPathFolder.get(keyUpdatePath);
-                if (delBookmark) {
-                    updatePaths.push({...insBookmark, oldPath: delBookmark.path});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            } else if (mapTitleFolder.has(keyUpdateTitle)) {
-                const delBookmark = mapTitleFolder.get(keyUpdateTitle);
-                if (delBookmark) {
-                    updateTitles.push({...insBookmark, oldTitle: delBookmark.title});
-                    // Remove the entries from both delBookmarks and insBookmarks
-                    deletions.splice(deletions.indexOf(delBookmark), 1);
-                    insertions.splice(i, 1);
-                }
-            }
-        }
-    }
-
-    return {insertions, deletions, updateUrls, updateTitles, updateIndexes, updatePaths};
+    return {insertions, deletions};
 }
 
 // Function to compare bookmarks
@@ -604,20 +476,10 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
         if (message.action === 'Local Update') {
             const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
             await modifyLocalBookmarks(deletions, insertions);
-            //Now we need to rescan, as indexes may have shifted
-            const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
-            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
-            await applyLocalBookmarkUpdates(changes.updateUrls, changes.updateTitles, changes.updateIndexes, changes.updatePaths);
             await closeConfirmationWindow();
         } else if (message.action === 'Local Update-merge') {
             const {insertions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'remoteBookmarks']);
             await modifyLocalBookmarks([], insertions);
-            //Now we need to rescan, as indexes may have shifted
-            const bookmarkTreeNodes = await browser.bookmarks.getTree()
-            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
-            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
-            await applyLocalBookmarkUpdates(changes.updateUrls, changes.updateTitles, changes.updateIndexes, changes.updatePaths);
             await closeConfirmationWindow();
             //since we may have some local changes (merges), try to set local as master and merge
             const {url, username, password} = await loadConfig();
