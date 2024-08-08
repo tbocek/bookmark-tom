@@ -40,7 +40,7 @@ jobs:
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         run: |
           npm run test
-          npx run lint
+          npm run lint
           npx web-ext sign \
             --source-dir ./src \
             --api-key $AMO_API_KEY \
