@@ -2,9 +2,11 @@
 
 **What**: Tom's Bookmark Saver is a browser extension designed to synchronize bookmarks between your local browser and a remote WebDAV server. It handles authentication, fetching, updating, and synchronizing of bookmarks to ensure data consistency between local and remote sources. The extension also includes a confirmation interface for reviewing changes before they are applied.
 
-**Why**: Since I have multiple machines which are synchronized with Nextcloud, I also wanted a simple solution for syncing bookmarks. Unfortunately, the export/import feature of Firefox creates files with modified content and a new timestamp, so I ended up with a lot of conflicts. Another option is to use FireFox sync, but this requires yet another account, or alternatively [self-host](https://github.com/mozilla-services/syncstorage-rs) it. Both options are not optimal and I wanted to have something that works with my existing setup. Since I could not find anything, I built it. Since the id of the bookmarks are not exposed via API, detecting changes is a bit cumbersome. Thus, changes of those bookmarks updates are presented to the user for a final check.
+**Why**: Since I have multiple machines which are synchronized with Nextcloud, I also wanted a simple solution for syncing bookmarks. Unfortunately, the export/import feature of Firefox creates files with modified content and a new timestamp, so I ended up with a lot of conflicts. Another option is to use FireFox sync, but this requires yet another account, or alternatively [self-host](https://github.com/mozilla-services/syncstorage-rs) it. Both options are not optimal and I wanted to have something that works with my existing setup. Since I could not find anything, I built it.
 
-How: Plain Javascript with HTML/CSS with ~800 lines of code.
+**How**: Plain Javascript with HTML/CSS with ~800 lines of code.
+
+**Limitations**: Since the id of the bookmarks are not exposed via API, detecting changes is a bit cumbersome. Thus, changes of those bookmarks updates are presented to the user for a final check.
 
 ## User Setup
 To install the extension, follow these steps:
@@ -12,8 +14,22 @@ To install the extension, follow these steps:
 * Visit the [Tom's Bookmark Saver add-on page](https://addons.mozilla.org/en-US/firefox/addon/tom-s-bookmark-saver/).
 * Click on the "Install" button to add the extension to your browser.
 
-### Preferences
-To make this plugin work, setup your webdav settings as shown in this screen:
+### Developer Setup
+If you want to extend or run from source, then you can get the sources from GitHub:
+
+```
+git clone git@github.com:tbocek/bookmark-tom.git
+```
+Next, open Firefox and navigate to:
+```
+about:debugging#/runtime/this-firefox
+```
+Then, click on "Load Temporary Add-on..." and select the ```manifest.json``` file from the cloned repository. The extension should now be visible in your browser. To apply code changes:
+   * Click "Reload".
+   * To view logs, click "Inspect". A new window will open where you can see the console logs.
+
+## Extension/Addon Setup
+To make this extension/addon work, setup your webdav settings as shown in this screen:
 
 ![setup](setup.png)
 
@@ -21,40 +37,23 @@ You can test your configuration before saving it.
 
 ### Synchronization
 
-Depending if its a local sync or remote sync the following screen is shown
-
-The local change:
-
-![local](local.png)
-
-The remote change:
-
-![remote](remote.png)
-
-To trigger a remote sync, click on the extension and click sync:
+As soon as the config is working (make sure you see no errors in the sync popup). On successful sync, it should look like this:
 
 ![popup](popup.png)
 
+If something is wrong, the error message is shown in this popup. One possible issue is that if the file does not exist, it shows an error message. Thus, the file needs to be added manually.
 
-## Developer Setup
-1. If you want to extend or debug the extension, follow these steps:
+Once, the webdav folder is setup and the fil exists, synchronization can start. Depending on if it is a local sync or remote sync the following screen is shown:
 
-   ```
-   git clone git@github.com:tbocek/bookmark-tom.git
-   ```
-1. Open Firefox and navigate to:
+For local changes:
 
-    ```
-    about:debugging#/runtime/this-firefox
-    ```
-1. Click on "Load Temporary Add-on..." and select the ```manifest.json``` file from the cloned repository.
+![local](local.png)
 
-1. The extension should now be visible in your browser. To apply code changes:
-   * Click "Reload".
-   * To view logs, click "Inspect". A new window will open where you can see the console logs.
+For remote changes:
 
+![remote](remote.png)
 
-## Local Update Process
+## Local Update Process Details
 
 The local update process involves taking bookmarks from the remote WebDAV server and applying them to your local Firefox bookmarks. This process is initiated when the user chooses to update their local bookmarks based on changes detected on the remote server.
 
@@ -76,7 +75,7 @@ The local update process involves taking bookmarks from the remote WebDAV server
 
 6. **Final Synchronization**: If local changes were made (e.g., through a merge process), the extension may set the local bookmarks as the master and merge them with the remote bookmarks.
 
-## Remote Update Process
+## Remote Update Process Details
 
 The remote update process involves uploading your current local bookmarks to the remote WebDAV server, effectively making your local bookmarks the master copy.
 
