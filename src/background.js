@@ -182,35 +182,15 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
         console.error('Error updating bookmarks:', error);
     }
 }
-async function applyLocalBookmarkUpdates(upBookmarksUrls, upBookmarksTitles, upBookmarksIndexes, upBookmarksPaths) {
+async function applyLocalBookmarkUpdates(upBookmarksIndexes) {
     try {
         // Update Bookmarks
-        for (const upBookmarksUrl of upBookmarksUrls) {
-            const id = await locateBookmarkId(upBookmarksUrl.oldUrl, upBookmarksUrl.title, null, upBookmarksUrl.path);
-            if (id) {
-                await browser.bookmarks.update(id, {url: upBookmarksUrl.url});
-            }
-        }
-        for (const upBookmarksTitle of upBookmarksTitles) {
-            const id = await locateBookmarkId(upBookmarksTitle.url, upBookmarksTitle.oldTitle, null, upBookmarksTitle.path);
-            if (id) {
-                await browser.bookmarks.update(id, {title: upBookmarksTitle.title});
-            }
-        }
         for (const upBookmarksIndex of upBookmarksIndexes) {
             const id = await locateBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
             if (id) {
                 await browser.bookmarks.move(id, {index: upBookmarksIndex.index});
             }
         }
-        for (const upBookmarksPath of upBookmarksPaths) {
-            const id = await locateBookmarkId(upBookmarksPath.url, upBookmarksPath.title, null, upBookmarksPath.oldPath);
-            const parentId = await locateParentId(upBookmarksPath.path)
-            if (id) {
-                await browser.bookmarks.move(id, {parentId: parentId, index: upBookmarksPath.index});
-            }
-        }
-
     } catch (error) {
         console.error('Error updating bookmarks:', error);
     }
@@ -220,12 +200,13 @@ async function applyLocalBookmarkUpdates(upBookmarksUrls, upBookmarksTitles, upB
 let previousTabId;
 let confirmationTabId = null;
 async function displayConfirmationPage(changes, action, localBookmarks, remoteBookmarks) {
-    const { insertions, deletions } = changes;
+    const { insertions, deletions, updateIndexes } = changes;
 
     // Store changes and context in the browser's local storage
     browser.storage.local.set({
         insertions: insertions,
         deletions: deletions,
+        updateIndexes: updateIndexes,
         action: action,
         localBookmarks: localBookmarks,
         remoteBookmarks: remoteBookmarks
@@ -264,7 +245,7 @@ async function closeConfirmationWindow() {
     }
 
     // Clear stored data
-    await browser.storage.local.remove(['insertions', 'deletions', 'action', 'localBookmarks', 'remoteBookmarks']);
+    await browser.storage.local.remove(['insertions', 'deletions', 'updateIndexes', 'action', 'localBookmarks', 'remoteBookmarks']);
     previousTabId = null;
 }
 
@@ -370,7 +351,61 @@ function calcBookmarkChanges(otherBookmarks, myBookmarks) {
         }
     });
 
-    return {insertions, deletions};
+    const updateIndexes = [];
+    const mapIndex = new Map();
+    const mapIndexFolder = new Map();
+
+    deletions.forEach(bookmark => {
+        if(bookmark.url) {
+            //here we have a regular entry
+            //we have: title, index, path, url
+            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/') + '#' + bookmark.url;
+            mapIndex.set(keyUpdateIndex, bookmark);
+        } else {
+            //here we have a folder entry
+            //we have: title, index, path
+            const keyUpdateIndex = bookmark.title + '#' + bookmark.path.join('/');
+            mapIndexFolder.set(keyUpdateIndex, bookmark);
+        }
+    });
+
+    // Iterate over insBookmarks to find matching entries in delBookmarks with different indexes
+    for (let i = insertions.length - 1; i >= 0; i--) {
+        const insBookmark = insertions[i];
+        if(insBookmark.url) {
+            //here we have a regular entry
+            //we have: title, index, path, url
+            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/') + '#' + insBookmark.url;
+
+            //index needs to come first
+            if (mapIndex.has(keyUpdateIndex)) {
+                const delBookmark = mapIndex.get(keyUpdateIndex);
+                if (delBookmark) {
+                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            }
+        } else {
+            //here we have a folder entry
+            //we have: title, index, path
+            const keyUpdateIndex = insBookmark.title + '#' + insBookmark.path.join('/');
+
+            //index needs to come first
+            if (mapIndexFolder.has(keyUpdateIndex)) {
+                const delBookmark = mapIndexFolder.get(keyUpdateIndex);
+                if (delBookmark) {
+                    updateIndexes.push({...insBookmark, oldIndex: delBookmark.index});
+                    // Remove the entries from both delBookmarks and insBookmarks
+                    deletions.splice(deletions.indexOf(delBookmark), 1);
+                    insertions.splice(i, 1);
+                }
+            }
+        }
+    }
+
+    return {insertions, deletions, updateIndexes};
 }
 
 // Function to compare bookmarks
@@ -476,10 +511,20 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
         if (message.action === 'Local Update') {
             const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
             await modifyLocalBookmarks(deletions, insertions);
+            //Now we need to rescan, as indexes may have shifted
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
+            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+            await applyLocalBookmarkUpdates(changes.updateIndexes);
             await closeConfirmationWindow();
         } else if (message.action === 'Local Update-merge') {
             const {insertions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'remoteBookmarks']);
             await modifyLocalBookmarks([], insertions);
+            //Now we need to rescan, as indexes may have shifted
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
+            const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+            await applyLocalBookmarkUpdates(changes.updateIndexes);
             await closeConfirmationWindow();
             //since we may have some local changes (merges), try to set local as master and merge
             const {url, username, password} = await loadConfig();

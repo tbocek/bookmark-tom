@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', async function () {
-    const storageData = await browser.storage.local.get(['insertions', 'deletions', 'action']);
-    const { insertions, deletions, action } = storageData;
+    const storageData = await browser.storage.local.get(['insertions', 'deletions', 'updateIndexes', 'action']);
+    const { insertions, deletions, updateIndexes, action } = storageData;
 
     const insertionsDiv = document.getElementById('insertions');
     const deletionsDiv = document.getElementById('deletions');
