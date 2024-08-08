@@ -40,16 +40,35 @@ li {
     vertical-align: middle;
     margin-right: 10px;
 }
+.spinner {
+    display: inline-block;
+    width: 1.5em;
+    height: 1.5em;
+    border: 3px solid rgba(0, 0, 0, 0.3);
+    border-radius: 50%;
+    border-top-color: #000;
+    animation: spin 1s ease-in-out infinite;
+    vertical-align: middle;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.button-text {
+    padding: 1em;
+}
 .buttons {
     margin-top: 20px;
 }
 button {
-    padding: 10px 20px;
-    font-size: 16px;
-    margin-right: 10px;
+    text-align: center;
+    vertical-align: center;
+    padding: 0.5em;
+    font-size: medium;
     cursor: pointer;
-    border-radius: 8px; /* Rounded corners */
-    border: none; /* Remove default border */
+    border-radius: 8px;
+    border: none;
+    margin-right: 1em;
+    color: white;
 }
 #confirm-merge {
     background-color: #28a745;

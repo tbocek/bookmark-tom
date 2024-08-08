@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const password = passwordInput.value;
 
         try {
-            spinner.style.visibility = '';
+            spinner.style.visibility = 'visible';
             const success = await fetchBookmarksFromWebDAV(webdavUrl,username,password);
             if (success) {
                 storeConfiguration();

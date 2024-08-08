@@ -508,6 +508,7 @@ browser.bookmarks.onRemoved.addListener(async () => {
 // Listen for messages to trigger the syncAllBookmarks function
 browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
     try {
+        const {url, username, password} = await loadConfig();
         if (message.action === 'Local Update') {
             const {insertions, deletions, remoteBookmarks} = await browser.storage.local.get(['insertions', 'deletions', 'remoteBookmarks']);
             await modifyLocalBookmarks(deletions, insertions);
@@ -527,25 +528,32 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             await applyLocalBookmarkUpdates(changes.updateIndexes);
             await closeConfirmationWindow();
             //since we may have some local changes (merges), try to set local as master and merge
-            const {url, username, password} = await loadConfig();
+
             await syncAllBookmarks(url, username, password, true, false);
         }
         else if (message.action === 'Remote Update') {
             const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
-            const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword']);
-            const url = config.webdavUrl;
-            const username = config.webdavUsername;
-            const password = config.webdavPassword;
             const response = await updateWebDAVBookmarks(url, username, password, localBookmarks);
             if(response === null) {
                 await browser.storage.local.set({ message: `Remote file not found: ${url}. Change URL or create an empty file.`});
             }
             await closeConfirmationWindow();
+        } else if (message.action === 'Remote Update-merge') {
+            const {deletions} = await browser.storage.local.get(['deletions']);
+            await modifyLocalBookmarks([], deletions); //those are the remote deletions, if we merge, we add them to our local bookmarks
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
+            const response = await updateWebDAVBookmarks(url, username, password, localBookmarks);
+            if(response === null) {
+                await browser.storage.local.set({ message: `Remote file not found: ${url}. Change URL or create an empty file.`});
+            }
+            await closeConfirmationWindow();
+            //since we may have some local changes (merges), try to set local as master and merge
+            await syncAllBookmarks(url, username, password, true, false);
         } else if (message.action === 'cancelChanges') {
             await closeConfirmationWindow();
         } else if (message.command === "syncAllBookmarks") {
             try {
-                const {url, username, password} = await loadConfig();
                 await syncAllBookmarks(url, username, password, false, false);
                 sendResponse({success: true});
             } catch (error) {

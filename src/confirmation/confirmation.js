@@ -6,6 +6,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     const deletionsDiv = document.getElementById('deletions');
     const directionImg = document.getElementById('direction');
 
+    const spinner1 = document.getElementById('spinner1');
+    const spinner2 = document.getElementById('spinner2');
+
     const cloudToMachineSVG = '../icons/cloud2machine.svg';
     const machineToCloudSVG = '../icons/machine2cloud.svg';
 
@@ -68,21 +71,22 @@ document.addEventListener('DOMContentLoaded', async function () {
         deletionsDiv.remove();
     }
 
-    const mergeBtn = document.getElementById('confirm-merge');
+    document.getElementById('confirm-force').addEventListener('click', function () {
+        spinner1.style.visibility = 'visible';
+        browser.runtime.sendMessage({ action: action });
+    });
 
+    const mergeBtn = document.getElementById('confirm-merge');
     // Enable the merge button conditionally
-    if (action === 'Local Update' && deletions && deletions.length > 0) {
+    if (deletions && deletions.length > 0) {
         mergeBtn.disabled = false;
         mergeBtn.addEventListener('click', function () {
+            spinner2.style.visibility = 'visible';
             browser.runtime.sendMessage({ action: action + "-merge" });
         });
     } else {
         mergeBtn.disabled = true;
     }
-
-    document.getElementById('confirm-force').addEventListener('click', function () {
-        browser.runtime.sendMessage({ action: action });
-    });
 
     document.getElementById('cancel').addEventListener('click', function () {
         browser.runtime.sendMessage({ action: 'cancelChanges' });

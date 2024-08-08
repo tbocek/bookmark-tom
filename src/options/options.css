@@ -45,15 +45,15 @@ img {
     animation: spin 1s ease-in-out infinite;
     vertical-align: middle;
 }
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
 .button-text {
     padding: 1em;
 }
 .button-text-black {
     padding: 1em;
     color: #000;
-}
-@keyframes spin {
-    to { transform: rotate(360deg); }
 }
 .container {
     display: flex;

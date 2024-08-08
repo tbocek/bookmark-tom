@@ -14,9 +14,18 @@
 <div id="insertions" class="content-div"></div>
 <div id="deletions" class="content-div"></div>
 <div class="buttons">
-    <button id="confirm-force">Proceed</button>
-    <button id="confirm-merge" disabled="true">Proceed (merge, do not delete)</button>
-    <button id="cancel">Cancel</button>
+    <button id="confirm-force">
+        <span class="button-text">Proceed</span>
+        <div id="spinner1" class="spinner" style="visibility:hidden;"></div>
+    </button>
+    <button id="confirm-merge" disabled="true">
+        <span class="button-text">Proceed (merge, do not delete)</span>
+        <div id="spinner2" class="spinner" style="visibility:hidden;"></div>
+    </button>
+    <button id="cancel">
+        <span class="button-text">Cancel</span>
+        <div id="spinner3" class="spinner" style="visibility:hidden;"></div>
+    </button>
 </div>
 <script src="confirmation.js"></script>
 </body>
