@@ -17,7 +17,12 @@ async function fetchWebDAVBookmarks(url, username, password) {
     headers.set('Authorization', 'Basic ' + btoa(username + ":" + password));
     headers.set('X-Extension-Request', 'bookmark');
 
-    const response = await fetch(url, {
+    // Append a cache-busting parameter to the URL
+    const cacheBuster = `cb=${new Date().getTime()}`;
+    const urlWithCacheBuster = url.includes('?') ? `${url}&${cacheBuster}` : `${url}?${cacheBuster}`;
+
+
+    const response = await fetch(urlWithCacheBuster, {
         headers: headers,
         credentials: 'omit',
     });
@@ -168,6 +173,10 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
         }
         // Insert bookmarks
         for (const insBookmark of insBookmarks) {
+            const id = await locateBookmarkId(insBookmark.url, insBookmark.title, null, insBookmark.path);
+            if (id) {
+                continue;
+            }
             const parentId = await locateParentId(insBookmark.path);
             if (parentId) {
                 await browser.bookmarks.create({
@@ -272,7 +281,10 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
     const currentTime = new Date().toLocaleDateString('de-DE', options)
     await browser.storage.local.set({ message: `Last sync: ${currentTime}`});
 
-    if(!isBookmarksChanged(remoteBookmarks, localBookmarks)) {
+    const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+    if((changes.insertions && changes.insertions.length === 0) &&
+        (changes.deletions && changes.deletions.length === 0) &&
+        (changes.updateIndexes && changes.updateIndexes.length === 0)) {
         return;
     }
 
@@ -292,6 +304,8 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
                     const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
                     await displayConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
                 } else {
+                    console.log("remote", remoteBookmarks)
+                    console.log("local", localBookmarks)
                     const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
                     await displayConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
                 }
@@ -408,29 +422,6 @@ function calcBookmarkChanges(otherBookmarks, myBookmarks) {
     return {insertions, deletions, updateIndexes};
 }
 
-// Function to compare bookmarks
-function isBookmarksChanged(mainBookmarks, oldBookmarks) {
-    if(mainBookmarks === null && oldBookmarks.length > 0) {
-        return true;
-    }
-    if (mainBookmarks.length !== oldBookmarks.length) {
-        return true;
-    }
-
-    const localMap = new Map(oldBookmarks.map(b => [b.url + b.path + b.title + b.index, b]));
-
-    for (const remoteBookmark of mainBookmarks) {
-        const localBookmark = localMap.get(remoteBookmark.url + remoteBookmark.path + remoteBookmark.title + remoteBookmark.index);
-        if (!localBookmark) {
-            return true;
-        }
-        if (JSON.stringify(remoteBookmark) !== JSON.stringify(localBookmark)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 async function loadConfig()  {
     const config = await browser.storage.sync.get(['webdavUrl', 'webdavUsername', 'webdavPassword', 'checkIntervalMinutes']);
     const url = config.webdavUrl;
@@ -532,7 +523,8 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             await syncAllBookmarks(url, username, password, true, false);
         }
         else if (message.action === 'Remote Update') {
-            const {localBookmarks} = await browser.storage.local.get(['localBookmarks']);
+            const bookmarkTreeNodes = await browser.bookmarks.getTree()
+            const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
             const response = await updateWebDAVBookmarks(url, username, password, localBookmarks);
             if(response === null) {
                 await browser.storage.local.set({ message: `Remote file not found: ${url}. Change URL or create an empty file.`});
