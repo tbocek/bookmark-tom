@@ -8,7 +8,7 @@
 
 **Limitations**: Since the id of the bookmarks are not exposed via API, detecting changes is a bit cumbersome. Thus, changes of those bookmarks updates are presented to the user for a final check.
 
-[![Tom's Bookmark Saver](http://img.youtube.com/vi/Cs-66kEOFVY/0.jpg)](http://www.youtube.com/watch?v=Cs-66kEOFVY "Tom's Bookmark Saver")
+[![Tom's Bookmark Saver](https://img.youtube.com/vi/Cs-66kEOFVY/0.jpg)](https://www.youtube.com/watch?v=Cs-66kEOFVY "Tom's Bookmark Saver")
 
 ## User Setup
 To install the extension, follow these steps:
