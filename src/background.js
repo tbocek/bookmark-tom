@@ -179,6 +179,9 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
             }
             const parentId = await locateParentId(insBookmark.path);
             if (parentId) {
+                if(insBookmark.index === -1) {
+                    insBookmark.index = insBookmark.oldIndex;
+                }
                 await browser.bookmarks.create({
                     parentId,
                     title: insBookmark.title,
@@ -197,6 +200,9 @@ async function applyLocalBookmarkUpdates(upBookmarksIndexes) {
         for (const upBookmarksIndex of upBookmarksIndexes) {
             const id = await locateBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
             if (id) {
+                if(upBookmarksIndex.index === -1) {
+                    upBookmarksIndex.index = upBookmarksIndex.oldIndex;
+                }
                 await browser.bookmarks.move(id, {index: upBookmarksIndex.index});
             }
         }
@@ -301,12 +307,16 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
             // OK button clicked
             try {
                 if(localMaster || !remoteBookmarks) {
+                    console.log("remote (local master, notify):", remoteBookmarks);
+                    console.log("local (local master, notify):", localBookmarks);
                     const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+                    console.log("changes (local master, notify):", changes);
                     await displayConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
                 } else {
-                    console.log("remote", remoteBookmarks)
-                    console.log("local", localBookmarks)
+                    console.log("remote (remote master, notify):", remoteBookmarks);
+                    console.log("local (remote master, notify):", localBookmarks);
                     const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+                    console.log("changes (remote master, notify):", changes);
                     await displayConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
                 }
                 browser.notifications.clear(notificationId);
@@ -315,10 +325,16 @@ async function syncAllBookmarks(url, username, password, localMaster, fromBackgr
             }
         });
     } else if(localMaster || !remoteBookmarks) {
+        console.log("remote (local master, silent):", remoteBookmarks);
+        console.log("local (local master, silent):", localBookmarks);
         const changes = calcBookmarkChanges(localBookmarks, remoteBookmarks?remoteBookmarks:[]);
+        console.log("changes (local master, silent):", changes);
         await displayConfirmationPage(changes, 'Remote Update', localBookmarks, remoteBookmarks?remoteBookmarks:[]);
     } else {
+        console.log("remote (remote master, silent):", remoteBookmarks);
+        console.log("local (remote master, silent):", localBookmarks);
         const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
+        console.log("changes (remote master, silent):", changes);
         await displayConfirmationPage(changes, 'Local Update', localBookmarks, remoteBookmarks);
     }
 }
@@ -523,6 +539,8 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             await syncAllBookmarks(url, username, password, true, false);
         }
         else if (message.action === 'Remote Update') {
+            const {updateIndexes} = await browser.storage.local.get(['updateIndexes']);
+            await applyLocalBookmarkUpdates(updateIndexes);
             const bookmarkTreeNodes = await browser.bookmarks.getTree()
             const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
             const response = await updateWebDAVBookmarks(url, username, password, localBookmarks);
@@ -531,6 +549,8 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             }
             await closeConfirmationWindow();
         } else if (message.action === 'Remote Update-merge') {
+            const {updateIndexes} = await browser.storage.local.get(['updateIndexes']);
+            await applyLocalBookmarkUpdates(updateIndexes);
             const {deletions} = await browser.storage.local.get(['deletions']);
             await modifyLocalBookmarks([], deletions); //those are the remote deletions, if we merge, we add them to our local bookmarks
             const bookmarkTreeNodes = await browser.bookmarks.getTree()
