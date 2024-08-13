@@ -102,7 +102,8 @@ async function locateBookmarkId(url, title, index, pathArray) {
 
     // If a URL is provided, search by URL
     if (url) {
-        searchResults = await browser.bookmarks.search({ url });
+        // we need query, as url: does not work with e.g., moz-extension://
+        searchResults = await browser.bookmarks.search({ query: url });
     } else if(title) {
         // If no URL is provided, search by title
         searchResults = await browser.bookmarks.search({ title });
@@ -535,7 +536,6 @@ browser.runtime.onMessage.addListener( async(message, sender, sendResponse) => {
             await applyLocalBookmarkUpdates(changes.updateIndexes);
             await closeConfirmationWindow();
             //since we may have some local changes (merges), try to set local as master and merge
-
             await syncAllBookmarks(url, username, password, true, false);
         }
         else if (message.action === 'Remote Update') {
