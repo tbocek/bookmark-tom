@@ -151,8 +151,15 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
         // Delete bookmarks
         for (const delBookmark of sortedDeletions) {
             const id = await locateBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
-            if (id) {
-                await browser.bookmarks.remove(id);
+            try {
+                if (id) {
+                    await browser.bookmarks.remove(id);
+                } else {
+                    console.warn("bookmark not found", delBookmark)
+                }
+            }
+            catch (error) {
+                console.error('Error deleting bookmark:', delBookmark, error);
             }
         }
 
