@@ -134,13 +134,106 @@ async function locateBookmarkId(url, title, index, pathArray) {
     return null; // No matching bookmark found
 }
 
-//Find the Id of the bookmark folder specified in pathArray
+async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
+    try {
+        // First, collect all folder operations
+        const folderOperations = insBookmarks.filter(bookmark => !bookmark.url);
+        const nonFolderOperations = insBookmarks.filter(bookmark => bookmark.url);
+
+        // Delete bookmarks (starting from deepest level to avoid parent deletion issues)
+        for (let i = delBookmarks.length - 1; i >= 0; i--) {
+            const delBookmark = delBookmarks[i];
+            const id = await locateBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
+            if (id) {
+                await browser.bookmarks.remove(id);
+            }
+        }
+
+        // First create folders
+        for (const folder of folderOperations) {
+            const id = await locateBookmarkId(null, folder.title, null, folder.path);
+            if (!id) {
+                const parentId = await locateParentId(folder.path);
+                if (parentId) {
+                    const index = folder.index === -1 ?
+                        (folder.oldIndex !== undefined ? folder.oldIndex : undefined) :
+                        folder.index;
+
+                    await browser.bookmarks.create({
+                        parentId,
+                        title: folder.title,
+                        index
+                    });
+                }
+            }
+        }
+
+        // Then create bookmarks
+        for (const bookmark of nonFolderOperations) {
+            const id = await locateBookmarkId(bookmark.url, bookmark.title, null, bookmark.path);
+            if (!id) {
+                const parentId = await locateParentId(bookmark.path);
+                if (parentId) {
+                    const index = bookmark.index === -1 ?
+                        (bookmark.oldIndex !== undefined ? bookmark.oldIndex : undefined) :
+                        bookmark.index;
+
+                    await browser.bookmarks.create({
+                        parentId,
+                        title: bookmark.title,
+                        url: bookmark.url,
+                        index
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error updating bookmarks:', error);
+        throw error; // Re-throw to handle in caller
+    }
+}
+
+async function applyLocalBookmarkUpdates(upBookmarksIndexes) {
+    try {
+        // Sort updates by path length to handle parent folders first
+        const sortedUpdates = [...upBookmarksIndexes].sort(
+            (a, b) => a.path.length - b.path.length
+        );
+
+        for (const bookmark of sortedUpdates) {
+            const id = await locateBookmarkId(
+                bookmark.url,
+                bookmark.title,
+                bookmark.oldIndex,
+                bookmark.path
+            );
+
+            if (id) {
+                const index = bookmark.index === -1 ?
+                    bookmark.oldIndex :
+                    bookmark.index;
+
+                await browser.bookmarks.move(id, { index });
+            }
+        }
+    } catch (error) {
+        console.error('Error updating bookmark indexes:', error);
+        throw error;
+    }
+}
+
+// Helper function to improve error handling in locateParentId
 async function locateParentId(pathArray) {
+    if (!pathArray || pathArray.length === 0) {
+        const bookmarkTree = await browser.bookmarks.getTree();
+        return bookmarkTree[0].id; // Return root folder ID
+    }
+
     const bookmarkTree = await browser.bookmarks.getTree();
 
     function searchTree(nodes, pathParts) {
         if (pathParts.length === 0) {
-            return null;
+            return nodes[0].id; // Return current node's ID
         }
 
         const [currentPart, ...remainingParts] = pathParts;
@@ -159,57 +252,8 @@ async function locateParentId(pathArray) {
         }
         return null;
     }
-    return searchTree(bookmarkTree[0].children, pathArray);
-}
 
-async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
-    try {
-        // Delete bookmarks
-        for (let i = delBookmarks.length - 1; i >= 0; i--) {
-            const delBookmark = delBookmarks[i];
-            const id = await locateBookmarkId(delBookmark.url, delBookmark.title, null, delBookmark.path);
-            if (id) {
-                await browser.bookmarks.remove(id);
-            }
-        }
-        // Insert bookmarks
-        for (const insBookmark of insBookmarks) {
-            const id = await locateBookmarkId(insBookmark.url, insBookmark.title, null, insBookmark.path);
-            if (id) {
-                continue;
-            }
-            const parentId = await locateParentId(insBookmark.path);
-            if (parentId) {
-                if(insBookmark.index === -1) {
-                    insBookmark.index = insBookmark.oldIndex;
-                }
-                await browser.bookmarks.create({
-                    parentId,
-                    title: insBookmark.title,
-                    url: insBookmark.url,
-                    index: insBookmark.index
-                });
-            }
-        }
-    } catch (error) {
-        console.error('Error updating bookmarks:', error);
-    }
-}
-async function applyLocalBookmarkUpdates(upBookmarksIndexes) {
-    try {
-        // Update Bookmarks
-        for (const upBookmarksIndex of upBookmarksIndexes) {
-            const id = await locateBookmarkId(upBookmarksIndex.url, upBookmarksIndex.title, upBookmarksIndex.oldIndex, upBookmarksIndex.path);
-            if (id) {
-                if(upBookmarksIndex.index === -1) {
-                    upBookmarksIndex.index = upBookmarksIndex.oldIndex;
-                }
-                await browser.bookmarks.move(id, {index: upBookmarksIndex.index});
-            }
-        }
-    } catch (error) {
-        console.error('Error updating bookmarks:', error);
-    }
+    return searchTree(bookmarkTree[0].children, pathArray);
 }
 
 //************************** NOTIFICATION ************************
