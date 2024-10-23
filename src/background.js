@@ -102,8 +102,29 @@ async function locateBookmarkId(url, title, index, pathArray) {
 
     // If a URL is provided, search by URL
     if (url) {
-        // we need query, as url: does not work with e.g., moz-extension://
-        searchResults = await browser.bookmarks.search({query: url});
+        try {
+            // First try exact URL search
+            searchResults = await browser.bookmarks.search({ url: url });
+
+            if (searchResults.length === 0) {
+                // If no results, try query search with the URL
+                searchResults = await browser.bookmarks.search({ query: url });
+            }
+
+            if (searchResults.length === 0) {
+                // Try searching with decoded URL
+                const decodedUrl = decodeURIComponent(url);
+                searchResults = await browser.bookmarks.search({ query: decodedUrl });
+            }
+        } catch (error) {
+            console.error('Error searching by URL:', error);
+            // Fallback to title search if URL search fails
+            if (title) {
+                searchResults = await browser.bookmarks.search({ title });
+            } else {
+                return null;
+            }
+        }
     } else if (title) {
         // If no URL is provided, search by title
         searchResults = await browser.bookmarks.search({title});
