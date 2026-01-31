@@ -2221,6 +2221,81 @@ describe("3-Way Diff with lastSyncedState", () => {
   });
 });
 
+describe("Move Bookmark to Subfolder", () => {
+  it("should detect move to subfolder as delete old + insert new", () => {
+    // User moves "b" from Bookmarks Toolbar to Bookmarks Toolbar > Test 123
+    // This should be: delete from old location, insert at new location
+
+    // Local has "b" in the new location (subfolder)
+    const localBookmarks = [
+      { title: "Test 123", path: ["Bookmarks Toolbar"], index: 0 },
+      {
+        title: "b",
+        url: "http://b/",
+        path: ["Bookmarks Toolbar", "Test 123"],
+        index: 0,
+      },
+    ];
+
+    // Remote has "b" in the old location (root)
+    const remoteData = [
+      { title: "Test 123", path: ["Bookmarks Toolbar"], index: 0 },
+      {
+        title: "b",
+        url: "http://b/",
+        path: ["Bookmarks Toolbar"],
+        index: 1,
+      },
+    ];
+
+    // Change log shows the move
+    const changeLog = [
+      {
+        type: "moved",
+        bookmark: {
+          title: "b",
+          url: "http://b/",
+          path: ["Bookmarks Toolbar", "Test 123"],
+          index: 0,
+        },
+        oldValues: {
+          path: ["Bookmarks Toolbar"],
+          index: 1,
+        },
+      },
+    ];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      [],
+      changeLog,
+      remoteData, // lastSyncedState = remote (no remote changes)
+    );
+
+    // Should NOT have local insertions (we're not pulling anything)
+    expect(result.localChanges.insertions).to.be.empty;
+
+    // Should have remote deletion (delete from old location)
+    expect(result.remoteChanges.deletions).to.have.lengthOf(1);
+    expect(result.remoteChanges.deletions[0].title).to.equal("b");
+    expect(result.remoteChanges.deletions[0].path).to.deep.equal([
+      "Bookmarks Toolbar",
+    ]);
+
+    // Should have remote insertion (insert at new location)
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(result.remoteChanges.insertions[0].title).to.equal("b");
+    expect(result.remoteChanges.insertions[0].path).to.deep.equal([
+      "Bookmarks Toolbar",
+      "Test 123",
+    ]);
+
+    // No conflicts
+    expect(result.conflicts).to.be.empty;
+  });
+});
+
 describe("Sync After Conflict Resolution", () => {
   it("should have clean state after choosing local master (no repeated conflicts)", () => {
     // After user chooses local master:

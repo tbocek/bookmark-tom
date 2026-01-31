@@ -1233,11 +1233,35 @@ function calcTombstoneChanges(
   }
 
   // Remaining unmatched remote bookmarks are new (to pull to local)
+  // UNLESS they are the old location of a moved bookmark (then delete from remote)
   for (const remote of stillUnmatchedRemote) {
     const key = bookmarkIdentityKey(remote);
     if (matchedRemoteKeys.has(key)) continue;
 
-    localChanges.insertions.push(remote);
+    // Check if this remote bookmark is the OLD location of a locally moved bookmark
+    const wasMovedFrom = changeLog.find((change) => {
+      if (change.type === "moved" && change.oldValues && change.bookmark) {
+        // Build the old bookmark state (title/url from bookmark, path/index from oldValues)
+        const oldTitle = change.bookmark.title;
+        const oldUrl = change.bookmark.url || "";
+        const oldPath = change.oldValues.path;
+        // Check if remote matches the old location
+        return (
+          remote.title === oldTitle &&
+          (remote.url || "") === oldUrl &&
+          arraysEqual(remote.path, oldPath)
+        );
+      }
+      return false;
+    });
+
+    if (wasMovedFrom) {
+      // This is the old location of a moved bookmark - delete from remote
+      remoteChanges.deletions.push(remote);
+    } else {
+      // New remote bookmark - pull to local
+      localChanges.insertions.push(remote);
+    }
     matchedRemoteKeys.add(key);
   }
 
