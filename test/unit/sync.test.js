@@ -1043,3 +1043,655 @@ describe("Edge Cases", () => {
     expect(result.remoteChanges.insertions[0].path).to.deep.equal(["Folder2"]);
   });
 });
+
+describe("Folder Conflict Detection (Multi-Machine)", () => {
+  it("should detect folder_deleted_remote conflict (remote deleted folder, local has content)", () => {
+    // Machine A deletes folder "Archive", syncs tombstone to remote
+    // Machine B (offline) added bookmark to "Archive", then syncs
+    // Should show folder conflict
+
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Local has content inside the deleted folder
+    const localBookmarks = [
+      {
+        title: "LocalItem",
+        url: "http://local.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // Remote only has the tombstone
+    const remoteData = [folderTombstone];
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should detect folder conflict
+    expect(result.conflicts).to.have.lengthOf(1);
+    expect(result.conflicts[0].type).to.equal("folder_deleted_remote");
+    expect(result.conflicts[0].folder.title).to.equal("Archive");
+    expect(result.conflicts[0].localContent).to.have.lengthOf(1);
+    expect(result.conflicts[0].localContent[0].title).to.equal("LocalItem");
+
+    // Should NOT have normal insertions/deletions for the conflicted items
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+  });
+
+  it("should detect folder_deleted_local conflict (local deleted folder, remote has content)", () => {
+    // Machine B deletes folder "Archive", creates local tombstone
+    // Machine A (offline) added bookmark to "Archive", synced to remote
+    // Machine B syncs - should show folder conflict
+
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Remote has content inside the folder we deleted
+    const remoteBookmarks = [
+      {
+        title: "RemoteItem",
+        url: "http://remote.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // Local has no bookmarks but has the tombstone
+    const localBookmarks = [];
+    const localTombstones = [folderTombstone];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteBookmarks,
+      localTombstones,
+      [],
+    );
+
+    // Should detect folder conflict
+    expect(result.conflicts).to.have.lengthOf(1);
+    expect(result.conflicts[0].type).to.equal("folder_deleted_local");
+    expect(result.conflicts[0].folder.title).to.equal("Archive");
+    expect(result.conflicts[0].remoteContent).to.have.lengthOf(1);
+    expect(result.conflicts[0].remoteContent[0].title).to.equal("RemoteItem");
+
+    // Should NOT have normal insertions for the conflicted items
+    expect(result.localChanges.insertions).to.be.empty;
+  });
+
+  it("should handle multiple items in deleted folder conflict", () => {
+    const folderTombstone = {
+      title: "Projects",
+      path: ["Work"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Local has multiple items inside deleted folder
+    const localBookmarks = [
+      {
+        title: "Item1",
+        url: "http://item1.com",
+        path: ["Work", "Projects"],
+        index: 0,
+      },
+      {
+        title: "Item2",
+        url: "http://item2.com",
+        path: ["Work", "Projects"],
+        index: 1,
+      },
+      {
+        title: "SubFolder",
+        path: ["Work", "Projects"],
+        index: 2,
+      },
+      {
+        title: "DeepItem",
+        url: "http://deep.com",
+        path: ["Work", "Projects", "SubFolder"],
+        index: 0,
+      },
+    ];
+
+    const remoteData = [folderTombstone];
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    expect(result.conflicts).to.have.lengthOf(1);
+    expect(result.conflicts[0].type).to.equal("folder_deleted_remote");
+    expect(result.conflicts[0].localContent).to.have.lengthOf(4);
+  });
+
+  it("should not conflict if folder tombstone exists but no content inside", () => {
+    const folderTombstone = {
+      title: "EmptyFolder",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Local has bookmarks but NOT inside the deleted folder
+    const localBookmarks = [
+      {
+        title: "OtherItem",
+        url: "http://other.com",
+        path: ["Toolbar", "OtherFolder"],
+        index: 0,
+      },
+    ];
+
+    const remoteData = [folderTombstone];
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // No folder conflict since no content in deleted folder
+    expect(result.conflicts).to.be.empty;
+    // Should push local item normally
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+  });
+
+  it("should handle both folder conflict types simultaneously", () => {
+    // Rare but possible: local deleted FolderA, remote deleted FolderB
+    // And local has content in FolderB, remote has content in FolderA
+
+    const remoteFolderATombstone = {
+      title: "FolderA",
+      path: ["Root"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    const localFolderBTombstone = {
+      title: "FolderB",
+      path: ["Root"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Local has content in FolderA (which remote deleted)
+    const localBookmarks = [
+      {
+        title: "InFolderA",
+        url: "http://a.com",
+        path: ["Root", "FolderA"],
+        index: 0,
+      },
+    ];
+
+    // Remote has content in FolderB (which local deleted)
+    const remoteData = [
+      remoteFolderATombstone,
+      {
+        title: "InFolderB",
+        url: "http://b.com",
+        path: ["Root", "FolderB"],
+        index: 0,
+      },
+    ];
+
+    const localTombstones = [localFolderBTombstone];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should have two folder conflicts
+    expect(result.conflicts).to.have.lengthOf(2);
+
+    const remoteConflict = result.conflicts.find(
+      (c) => c.type === "folder_deleted_remote",
+    );
+    const localConflict = result.conflicts.find(
+      (c) => c.type === "folder_deleted_local",
+    );
+
+    expect(remoteConflict).to.exist;
+    expect(remoteConflict.folder.title).to.equal("FolderA");
+
+    expect(localConflict).to.exist;
+    expect(localConflict.folder.title).to.equal("FolderB");
+  });
+
+  it("should skip folder deletion when local has content (folder_deleted_remote)", () => {
+    // The folder itself should not appear in deletions when there's a conflict
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    // Local has the folder AND content inside it
+    const localBookmarks = [
+      { title: "Archive", path: ["Toolbar"], index: 0 }, // The folder itself
+      {
+        title: "InsideItem",
+        url: "http://inside.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    const remoteData = [folderTombstone];
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should have folder conflict
+    expect(result.conflicts).to.have.lengthOf(1);
+    expect(result.conflicts[0].type).to.equal("folder_deleted_remote");
+
+    // The folder itself should NOT be in deletions (it's part of the conflict)
+    const folderInDeletions = result.localChanges.deletions.find(
+      (d) => d.title === "Archive" && !d.url,
+    );
+    expect(folderInDeletions).to.be.undefined;
+  });
+});
+
+describe("Three-Machine Folder Conflict Scenarios", () => {
+  it("Machine A deletes folder, Machine B adds to folder, Machine C syncs - should see conflict", () => {
+    // Full scenario:
+    // 1. All machines start with folder "Archive" (empty)
+    // 2. Machine A deletes folder, syncs → tombstone in remote
+    // 3. Machine B (offline) adds bookmark to folder
+    // 4. Machine B syncs → should see folder_deleted_remote conflict
+    // 5. Machine B chooses local master → folder preserved, pushed to remote
+    // 6. Machine C syncs → should see folder restored, no conflict
+
+    // Step 4: Machine B syncs, sees tombstone vs local content
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now() - 1000,
+    };
+
+    const localBookmarksB = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "NewItem",
+        url: "http://new.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    const remoteAfterA = [folderTombstone];
+
+    const resultB = calcTombstoneChanges(localBookmarksB, remoteAfterA, [], []);
+
+    // Machine B should see folder conflict
+    expect(resultB.conflicts).to.have.lengthOf(1);
+    expect(resultB.conflicts[0].type).to.equal("folder_deleted_remote");
+    expect(resultB.conflicts[0].folder.title).to.equal("Archive");
+
+    // Step 6: Machine C syncs after B chose local master
+    // Remote now has the folder and content (B pushed it)
+    const remoteAfterB = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "NewItem",
+        url: "http://new.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // Machine C still has the old state (empty, just the folder)
+    const localBookmarksC = [{ title: "Archive", path: ["Toolbar"], index: 0 }];
+
+    const resultC = calcTombstoneChanges(localBookmarksC, remoteAfterB, [], []);
+
+    // Machine C should pull the new item, no conflict
+    expect(resultC.conflicts).to.be.empty;
+    expect(resultC.localChanges.insertions).to.have.lengthOf(1);
+    expect(resultC.localChanges.insertions[0].title).to.equal("NewItem");
+  });
+
+  it("Machine A adds to folder, Machine B deletes folder, Machine C syncs - should see conflict on B", () => {
+    // Reverse scenario:
+    // 1. All machines start with folder "Archive" (empty)
+    // 2. Machine A adds bookmark to folder, syncs
+    // 3. Machine B (offline) deletes folder, creates tombstone
+    // 4. Machine B syncs → should see folder_deleted_local conflict
+    // 5. Machine B chooses remote master → folder preserved with A's content
+    // 6. Machine C syncs → should see folder with content, no conflict
+
+    // Step 4: Machine B syncs, has tombstone but remote has content
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+
+    const localBookmarksB = []; // B deleted the folder
+
+    const remoteAfterA = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "ItemFromA",
+        url: "http://a.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    const localTombstonesB = [folderTombstone];
+
+    const resultB = calcTombstoneChanges(
+      localBookmarksB,
+      remoteAfterA,
+      localTombstonesB,
+      [],
+    );
+
+    // Machine B should see folder_deleted_local conflict
+    expect(resultB.conflicts).to.have.lengthOf(1);
+    expect(resultB.conflicts[0].type).to.equal("folder_deleted_local");
+    expect(resultB.conflicts[0].folder.title).to.equal("Archive");
+    expect(resultB.conflicts[0].remoteContent).to.have.lengthOf(1);
+
+    // Step 6: Machine C syncs (started with empty folder)
+    const localBookmarksC = [{ title: "Archive", path: ["Toolbar"], index: 0 }];
+
+    const resultC = calcTombstoneChanges(localBookmarksC, remoteAfterA, [], []);
+
+    // Machine C should just pull the new item, no conflict
+    expect(resultC.conflicts).to.be.empty;
+    expect(resultC.localChanges.insertions).to.have.lengthOf(1);
+    expect(resultC.localChanges.insertions[0].title).to.equal("ItemFromA");
+  });
+
+  it("Machine A and B both delete same folder, Machine C has content - C should see conflict", () => {
+    // Edge case: two machines delete, third has content
+    // 1. All machines start with folder "Archive" with one item
+    // 2. Machine A deletes folder, syncs tombstone
+    // 3. Machine B also deletes folder (offline), syncs - no conflict (both agree)
+    // 4. Machine C (offline) added new item to folder
+    // 5. Machine C syncs → should see conflict (remote tombstone vs local content)
+
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now() - 1000,
+    };
+
+    // Machine C has local content in the folder
+    const localBookmarksC = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "NewFromC",
+        url: "http://c.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // Remote has tombstone from A (and B agreed)
+    const remoteAfterAB = [folderTombstone];
+
+    const resultC = calcTombstoneChanges(
+      localBookmarksC,
+      remoteAfterAB,
+      [],
+      [],
+    );
+
+    // Machine C should see folder conflict
+    expect(resultC.conflicts).to.have.lengthOf(1);
+    expect(resultC.conflicts[0].type).to.equal("folder_deleted_remote");
+    expect(resultC.conflicts[0].localContent).to.have.lengthOf(1);
+    expect(resultC.conflicts[0].localContent[0].title).to.equal("NewFromC");
+  });
+
+  it("Folder revival: deleted folder gets content, tombstone should not cause conflict on next sync", () => {
+    // Scenario: Folder was deleted, then user recreates it with content
+    // Tombstone should be removed, not cause repeated conflicts
+
+    // After revival: local has folder and content, tombstone was removed
+    const localBookmarks = [
+      { title: "Revived", path: ["Toolbar"], index: 0 },
+      {
+        title: "NewContent",
+        url: "http://new.com",
+        path: ["Toolbar", "Revived"],
+        index: 0,
+      },
+    ];
+
+    // Remote still has old tombstone (not yet synced)
+    const remoteTombstone = {
+      title: "Revived",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now() - 10000, // Old tombstone
+    };
+
+    const remoteData = [remoteTombstone];
+
+    // Local tombstone was removed when folder was recreated
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should show conflict - remote says deleted, local has content
+    expect(result.conflicts).to.have.lengthOf(1);
+    expect(result.conflicts[0].type).to.equal("folder_deleted_remote");
+
+    // After user chooses local master and syncs again:
+    const remoteAfterResolution = [
+      { title: "Revived", path: ["Toolbar"], index: 0 },
+      {
+        title: "NewContent",
+        url: "http://new.com",
+        path: ["Toolbar", "Revived"],
+        index: 0,
+      },
+    ];
+
+    const result2 = calcTombstoneChanges(
+      localBookmarks,
+      remoteAfterResolution,
+      [],
+      [],
+    );
+
+    // Should be clean - no conflicts, no changes
+    expect(result2.conflicts).to.be.empty;
+    expect(result2.localChanges.insertions).to.be.empty;
+    expect(result2.localChanges.deletions).to.be.empty;
+    expect(result2.remoteChanges.insertions).to.be.empty;
+    expect(result2.remoteChanges.deletions).to.be.empty;
+  });
+
+  it("Three machines with interleaved changes - complex scenario", () => {
+    // Complex realistic scenario:
+    // Initial: All have Folder1/Item1, Folder2/Item2
+    // Machine A: Deletes Folder1, adds Folder3/Item3
+    // Machine B: Adds Folder1/Item4 (to folder A deleted), deletes Folder2
+    // Machine C: Adds Folder2/Item5 (to folder B deleted)
+    //
+    // When B syncs after A: conflict on Folder1
+    // When C syncs after A+B resolved: conflict on Folder2
+
+    // Simulating C's sync after A's changes are in remote
+    // A deleted Folder1 and added Folder3
+    const folder1Tombstone = {
+      title: "Folder1",
+      path: [],
+      deleted: true,
+      deletedAt: Date.now() - 2000,
+    };
+
+    // C has content in Folder1 (which A deleted) and Folder2
+    const localBookmarksC = [
+      { title: "Folder1", path: [], index: 0 },
+      { title: "Item1", url: "http://item1.com", path: ["Folder1"], index: 0 },
+      { title: "Folder2", path: [], index: 1 },
+      { title: "Item2", url: "http://item2.com", path: ["Folder2"], index: 0 },
+      {
+        title: "Item5",
+        url: "http://item5.com",
+        path: ["Folder2"],
+        index: 1,
+      }, // C added this
+    ];
+
+    // Remote after A: Folder1 deleted, Folder3 added
+    const remoteAfterA = [
+      folder1Tombstone,
+      { title: "Folder2", path: [], index: 0 },
+      { title: "Item2", url: "http://item2.com", path: ["Folder2"], index: 0 },
+      { title: "Folder3", path: [], index: 1 },
+      { title: "Item3", url: "http://item3.com", path: ["Folder3"], index: 0 },
+    ];
+
+    const resultC = calcTombstoneChanges(localBookmarksC, remoteAfterA, [], []);
+
+    // C should see conflict on Folder1 (A deleted, C has content)
+    const folder1Conflict = resultC.conflicts.find(
+      (c) => c.folder && c.folder.title === "Folder1",
+    );
+    expect(folder1Conflict).to.exist;
+    expect(folder1Conflict.type).to.equal("folder_deleted_remote");
+
+    // C should pull Folder3 and Item3
+    expect(resultC.localChanges.insertions).to.have.lengthOf(2);
+    const insertedTitles = resultC.localChanges.insertions.map((i) => i.title);
+    expect(insertedTitles).to.include("Folder3");
+    expect(insertedTitles).to.include("Item3");
+
+    // C should push Item5 (new item in Folder2)
+    expect(resultC.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(resultC.remoteChanges.insertions[0].title).to.equal("Item5");
+  });
+});
+
+describe("Sync After Conflict Resolution", () => {
+  it("should have clean state after choosing local master (no repeated conflicts)", () => {
+    // After user chooses local master:
+    // - Local content is preserved
+    // - Tombstones for revived folders should be removed
+    // - Next sync should show no conflicts
+
+    // Simulate state after local master was chosen:
+    // Local has the folder and content, tombstones are cleared
+    const localBookmarks = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "Item",
+        url: "http://item.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // Remote now has same content (pushed by local master)
+    const remoteData = [
+      { title: "Archive", path: ["Toolbar"], index: 0 },
+      {
+        title: "Item",
+        url: "http://item.com",
+        path: ["Toolbar", "Archive"],
+        index: 0,
+      },
+    ];
+
+    // No tombstones (they were cleaned up)
+    const localTombstones = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should be in sync - no changes, no conflicts
+    expect(result.conflicts).to.be.empty;
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.deletions).to.be.empty;
+  });
+
+  it("should have clean state after choosing remote master (folder deleted)", () => {
+    // After user chooses remote master:
+    // - Folder and content are deleted locally
+    // - Local tombstones match remote
+    // - Next sync should show no conflicts
+
+    // Local is empty (folder was deleted)
+    const localBookmarks = [];
+
+    // Remote has only the tombstone
+    const folderTombstone = {
+      title: "Archive",
+      path: ["Toolbar"],
+      deleted: true,
+      deletedAt: Date.now(),
+    };
+    const remoteData = [folderTombstone];
+
+    // Local tombstones match remote (from conflict resolution)
+    const localTombstones = [folderTombstone];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+    );
+
+    // Should be in sync - no changes, no conflicts
+    expect(result.conflicts).to.be.empty;
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.deletions).to.be.empty;
+  });
+});

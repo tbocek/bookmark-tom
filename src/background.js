@@ -7,6 +7,9 @@ const ACTIONS = {
   CANCEL: "cancelChanges",
 };
 
+// Flag to prevent recording sync-triggered changes in the change log
+let syncInProgress = false;
+
 //************************** HELPER **************************
 function arraysEqual(arr1, arr2) {
   if (arr1.length !== arr2.length) {
@@ -168,6 +171,11 @@ async function clearChangeLog() {
 
 // Record a local change
 async function recordChange(type, bookmarkId, info) {
+  // Skip recording if this change was triggered by sync operations
+  if (syncInProgress) {
+    return;
+  }
+
   const bookmarkIdMap = await getBookmarkIdMap();
   const changeLog = await getChangeLog();
 
@@ -897,15 +905,14 @@ function calcTombstoneChanges(
   const matchedLocalKeys = new Set();
   const matchedRemoteKeys = new Set();
 
-  // Phase 0: Detect folder conflicts (remote deleted folder, local has content in it)
+  // Phase 0: Detect folder conflicts
   const folderConflicts = new Set(); // Track folder paths with conflicts
+
+  // Phase 0a: Remote deleted folder, local has content in it
   for (const tombstone of remoteTombstones) {
-    // Only check folder tombstones
-    if (tombstone.url) continue;
+    if (tombstone.url) continue; // Only check folder tombstones
 
     const folderPath = [...tombstone.path, tombstone.title];
-
-    // Check if local has any bookmarks inside this folder
     const localContentInFolder = localBookmarks.filter((bm) => {
       if (bm.path.length >= folderPath.length) {
         return folderPath.every((segment, i) => bm.path[i] === segment);
@@ -914,27 +921,52 @@ function calcTombstoneChanges(
     });
 
     if (localContentInFolder.length > 0) {
-      // Conflict: remote deleted folder, but local has content in it
-      // Add a folder conflict
       conflicts.push({
-        type: "folder_deleted",
+        type: "folder_deleted_remote",
         folder: tombstone,
         localContent: localContentInFolder,
         message: `Folder "${tombstone.title}" was deleted remotely, but you have content in it`,
       });
 
-      // Mark the folder path as conflicting so we don't process these bookmarks normally
       folderConflicts.add(folderPath.join("/"));
 
-      // Mark all local content in this folder as matched (skip normal processing)
       for (const bm of localContentInFolder) {
         matchedLocalKeys.add(bookmarkIdentityKey(bm));
-
-        // Also find and mark any remote bookmarks that match by 3-of-4
-        // (e.g., same bookmark but at different path outside the deleted folder)
         const remoteMatch = find3of4Match(bm, remoteBookmarks);
         if (remoteMatch) {
           matchedRemoteKeys.add(bookmarkIdentityKey(remoteMatch));
+        }
+      }
+    }
+  }
+
+  // Phase 0b: Local deleted folder, remote has content in it (reverse scenario)
+  for (const tombstone of localTombstones) {
+    if (tombstone.url) continue; // Only check folder tombstones
+
+    const folderPath = [...tombstone.path, tombstone.title];
+    const remoteContentInFolder = remoteBookmarks.filter((bm) => {
+      if (bm.path.length >= folderPath.length) {
+        return folderPath.every((segment, i) => bm.path[i] === segment);
+      }
+      return false;
+    });
+
+    if (remoteContentInFolder.length > 0) {
+      conflicts.push({
+        type: "folder_deleted_local",
+        folder: tombstone,
+        remoteContent: remoteContentInFolder,
+        message: `You deleted folder "${tombstone.title}", but remote has content in it`,
+      });
+
+      folderConflicts.add(folderPath.join("/"));
+
+      for (const bm of remoteContentInFolder) {
+        matchedRemoteKeys.add(bookmarkIdentityKey(bm));
+        const localMatch = find3of4Match(bm, localBookmarks);
+        if (localMatch) {
+          matchedLocalKeys.add(bookmarkIdentityKey(localMatch));
         }
       }
     }
@@ -1354,14 +1386,19 @@ async function handleSync(config) {
     "remoteBookmarks",
   ]);
 
-  // Apply remote changes to local
+  // Apply remote changes to local (with sync flag to prevent change log pollution)
   if (localChanges) {
-    await modifyLocalBookmarks(
-      localChanges.deletions,
-      localChanges.insertions,
-      localChanges.updates || [],
-    );
-    await applyLocalUpdates(localChanges.updates || []);
+    syncInProgress = true;
+    try {
+      await modifyLocalBookmarks(
+        localChanges.deletions,
+        localChanges.insertions,
+        localChanges.updates || [],
+      );
+      await applyLocalUpdates(localChanges.updates || []);
+    } finally {
+      syncInProgress = false;
+    }
   }
 
   // Get final local state
@@ -1415,6 +1452,12 @@ async function handleSync(config) {
   // Save merged tombstones locally
   await saveLocalTombstones(allTombstones);
 
+  // Save lastSyncedState for future conflict detection
+  await browser.storage.local.set({
+    lastSyncedState: finalBookmarks,
+    lastSyncTimestamp: Date.now(),
+  });
+
   // Clear change log after successful sync
   await clearChangeLog();
 
@@ -1457,6 +1500,12 @@ async function handleConflictLocal(config) {
 
   // Also update local tombstones to match
   await saveLocalTombstones(filteredTombstones);
+
+  // Save lastSyncedState for future conflict detection
+  await browser.storage.local.set({
+    lastSyncedState: localBookmarks,
+    lastSyncTimestamp: Date.now(),
+  });
 
   // Clear change log after successful sync
   await clearChangeLog();
@@ -1503,10 +1552,42 @@ async function handleConflictRemote(config) {
     }
   }
 
-  await modifyLocalBookmarks(toDelete, toInsert);
+  // Apply changes with sync flag to prevent change log pollution
+  syncInProgress = true;
+  try {
+    await modifyLocalBookmarks(toDelete, toInsert);
+  } finally {
+    syncInProgress = false;
+  }
 
-  // Clear local tombstones (we accepted remote)
-  await saveLocalTombstones(remoteTombstones);
+  // Get final state after applying changes
+  const finalBookmarks = await getLocalBookmarksSnapshot();
+
+  // Filter out tombstones for folders that now exist (revived by remote content)
+  const filteredTombstones = remoteTombstones.filter((tombstone) => {
+    if (!tombstone.url) {
+      const folderPath = [...tombstone.path, tombstone.title];
+      const folderExists = finalBookmarks.some((bm) => {
+        if (bm.path.length >= folderPath.length) {
+          return folderPath.every((segment, i) => bm.path[i] === segment);
+        }
+        return false;
+      });
+      if (folderExists) {
+        return false; // Remove this tombstone - folder was revived
+      }
+    }
+    return true;
+  });
+
+  // Save filtered tombstones locally
+  await saveLocalTombstones(filteredTombstones);
+
+  // Save lastSyncedState for future conflict detection
+  await browser.storage.local.set({
+    lastSyncedState: finalBookmarks,
+    lastSyncTimestamp: Date.now(),
+  });
 
   // Clear change log after successful sync
   await clearChangeLog();

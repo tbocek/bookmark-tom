@@ -107,33 +107,29 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   function createConflictListItem(conflict) {
-    // Handle folder_deleted conflict type
-    if (conflict.type === "folder_deleted") {
+    // Handle folder_deleted_remote conflict type (remote deleted folder, local has content)
+    if (conflict.type === "folder_deleted_remote") {
       const folder = conflict.folder;
       const folderPath = folder.path || [];
 
       const detailsDiv = document.createElement("div");
       detailsDiv.classList.add("conflict-details");
 
-      // Show folder info
       const folderDiv = document.createElement("div");
       folderDiv.classList.add("conflict-detail");
       folderDiv.innerHTML = `<span class="conflict-label">Folder:</span> <span class="conflict-value">${folder.title}</span> at ${folderPath.join(" > ") || "(root)"}`;
       detailsDiv.appendChild(folderDiv);
 
-      // Show message
       const msgDiv = document.createElement("div");
       msgDiv.classList.add("conflict-detail");
       msgDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">(deleted)</span>`;
       detailsDiv.appendChild(msgDiv);
 
-      // Show local content count
       const contentDiv = document.createElement("div");
       contentDiv.classList.add("conflict-detail");
       contentDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">${conflict.localContent.length} item(s) inside</span>`;
       detailsDiv.appendChild(contentDiv);
 
-      // List the local content
       if (conflict.localContent.length <= 5) {
         for (const bm of conflict.localContent) {
           const itemDiv = document.createElement("div");
@@ -145,7 +141,54 @@ document.addEventListener("DOMContentLoaded", async function () {
 
       const attrInfo = document.createElement("div");
       attrInfo.classList.add("conflict-attr");
-      attrInfo.textContent = "(folder deleted vs. local content)";
+      attrInfo.textContent = "(remote deleted folder vs. your local content)";
+      detailsDiv.appendChild(attrInfo);
+
+      return createBookmarkListItem(
+        { title: folder.title, path: folderPath },
+        {
+          className: "conflict-item",
+          boldTitle: true,
+          appendContent: detailsDiv,
+        },
+      );
+    }
+
+    // Handle folder_deleted_local conflict type (local deleted folder, remote has content)
+    if (conflict.type === "folder_deleted_local") {
+      const folder = conflict.folder;
+      const folderPath = folder.path || [];
+
+      const detailsDiv = document.createElement("div");
+      detailsDiv.classList.add("conflict-details");
+
+      const folderDiv = document.createElement("div");
+      folderDiv.classList.add("conflict-detail");
+      folderDiv.innerHTML = `<span class="conflict-label">Folder:</span> <span class="conflict-value">${folder.title}</span> at ${folderPath.join(" > ") || "(root)"}`;
+      detailsDiv.appendChild(folderDiv);
+
+      const msgDiv = document.createElement("div");
+      msgDiv.classList.add("conflict-detail");
+      msgDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">(you deleted this)</span>`;
+      detailsDiv.appendChild(msgDiv);
+
+      const contentDiv = document.createElement("div");
+      contentDiv.classList.add("conflict-detail");
+      contentDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">${conflict.remoteContent.length} item(s) inside</span>`;
+      detailsDiv.appendChild(contentDiv);
+
+      if (conflict.remoteContent.length <= 5) {
+        for (const bm of conflict.remoteContent) {
+          const itemDiv = document.createElement("div");
+          itemDiv.classList.add("conflict-detail", "conflict-content-item");
+          itemDiv.innerHTML = `&nbsp;&nbsp;- ${bm.title}`;
+          detailsDiv.appendChild(itemDiv);
+        }
+      }
+
+      const attrInfo = document.createElement("div");
+      attrInfo.classList.add("conflict-attr");
+      attrInfo.textContent = "(you deleted folder vs. remote content)";
       detailsDiv.appendChild(attrInfo);
 
       return createBookmarkListItem(
