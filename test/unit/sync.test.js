@@ -710,9 +710,41 @@ describe("Multi-Machine Scenarios (3 machines)", () => {
   });
 });
 
-describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
-  it("should detect title difference as conflict (not insert/delete)", () => {
-    // Local has title X2, remote has title X - this is a conflict
+describe("Change Log Based Conflict Detection", () => {
+  it("should treat 3-of-4 difference as remote update when no change log", () => {
+    // No change log = local didn't change = remote changed, pull to local
+    const localBookmark = {
+      title: "X",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "X2",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges(
+      [localBookmark],
+      [remoteBookmark],
+      [],
+      [],
+    );
+
+    // No change log = remote update, not conflict
+    expect(result.localChanges.updates).to.have.lengthOf(1);
+    expect(result.localChanges.updates[0].oldBookmark.title).to.equal("X");
+    expect(result.localChanges.updates[0].newBookmark.title).to.equal("X2");
+    expect(result.localChanges.updates[0].changedAttribute).to.equal("title");
+
+    expect(result.conflicts).to.be.empty;
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+  });
+
+  it("should treat 3-of-4 difference as local update when change log shows local changed", () => {
     const localBookmark = {
       title: "X2",
       url: "http://example.com",
@@ -726,73 +758,89 @@ describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
       index: 0,
     };
 
-    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+    // Change log shows local changed from X to X2
+    const changeLog = [
+      {
+        type: "changed",
+        bookmark: {
+          title: "X2",
+          url: "http://example.com",
+          path: ["Folder"],
+          index: 0,
+        },
+        oldValues: {
+          title: "X",
+          url: "http://example.com",
+          path: ["Folder"],
+          index: 0,
+        },
+      },
+    ];
 
-    // Should be a conflict, not separate insert/delete
+    const result = calcTombstoneChanges(
+      [localBookmark],
+      [remoteBookmark],
+      [],
+      changeLog,
+    );
+
+    // Change log shows we changed from remote state = push to remote
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].oldBookmark.title).to.equal("X");
+    expect(result.remoteChanges.updates[0].newBookmark.title).to.equal("X2");
+
+    expect(result.conflicts).to.be.empty;
+  });
+
+  it("should detect conflict when both local and remote changed", () => {
+    // Local changed from X to X2, but remote is now X3 (someone else changed it)
+    const localBookmark = {
+      title: "X2",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "X3",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    // Change log shows local changed from X to X2
+    const changeLog = [
+      {
+        type: "changed",
+        bookmark: {
+          title: "X2",
+          url: "http://example.com",
+          path: ["Folder"],
+          index: 0,
+        },
+        oldValues: {
+          title: "X",
+          url: "http://example.com",
+          path: ["Folder"],
+          index: 0,
+        },
+      },
+    ];
+
+    const result = calcTombstoneChanges(
+      [localBookmark],
+      [remoteBookmark],
+      [],
+      changeLog,
+    );
+
+    // Remote is X3, not X (our old state), so it's a real conflict
     expect(result.conflicts).to.have.lengthOf(1);
     expect(result.conflicts[0].local.title).to.equal("X2");
-    expect(result.conflicts[0].remote.title).to.equal("X");
-    expect(result.conflicts[0].changedAttribute).to.equal("title");
-
-    expect(result.localChanges.insertions).to.be.empty;
-    expect(result.remoteChanges.insertions).to.be.empty;
-    expect(result.localChanges.deletions).to.be.empty;
-    expect(result.remoteChanges.deletions).to.be.empty;
-  });
-
-  it("should detect URL difference as conflict", () => {
-    const localBookmark = {
-      title: "Test",
-      url: "http://new-url.com",
-      path: ["Folder"],
-      index: 0,
-    };
-    const remoteBookmark = {
-      title: "Test",
-      url: "http://old-url.com",
-      path: ["Folder"],
-      index: 0,
-    };
-
-    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
-
-    expect(result.conflicts).to.have.lengthOf(1);
-    expect(result.conflicts[0].changedAttribute).to.equal("url");
-    expect(result.conflicts[0].local.url).to.equal("http://new-url.com");
-    expect(result.conflicts[0].remote.url).to.equal("http://old-url.com");
-
-    expect(result.localChanges.insertions).to.be.empty;
-    expect(result.remoteChanges.insertions).to.be.empty;
-  });
-
-  it("should detect path difference (move) as conflict", () => {
-    const localBookmark = {
-      title: "Test",
-      url: "http://example.com",
-      path: ["NewFolder"],
-      index: 0,
-    };
-    const remoteBookmark = {
-      title: "Test",
-      url: "http://example.com",
-      path: ["OldFolder"],
-      index: 0,
-    };
-
-    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
-
-    expect(result.conflicts).to.have.lengthOf(1);
-    expect(result.conflicts[0].changedAttribute).to.equal("path");
-    expect(result.conflicts[0].local.path).to.deep.equal(["NewFolder"]);
-    expect(result.conflicts[0].remote.path).to.deep.equal(["OldFolder"]);
-
-    expect(result.localChanges.insertions).to.be.empty;
-    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.conflicts[0].remote.title).to.equal("X3");
   });
 
   it("should detect index-only change as update to remote (not conflict)", () => {
     // When identity matches but only index differs, local wins (not a conflict)
-    // because index changes are expected during reordering
     const localBookmark = {
       title: "Test",
       url: "http://example.com",
@@ -806,7 +854,12 @@ describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
       index: 0,
     };
 
-    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+    const result = calcTombstoneChanges(
+      [localBookmark],
+      [remoteBookmark],
+      [],
+      [],
+    );
 
     // Index-only changes are updates, not conflicts
     expect(result.remoteChanges.updates).to.have.lengthOf(1);
@@ -832,7 +885,12 @@ describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
       index: 0,
     };
 
-    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+    const result = calcTombstoneChanges(
+      [localBookmark],
+      [remoteBookmark],
+      [],
+      [],
+    );
 
     // Should be separate insert and delete, not conflict
     expect(result.conflicts).to.be.empty;
@@ -840,37 +898,27 @@ describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
     expect(result.localChanges.insertions).to.have.lengthOf(1);
   });
 
-  it("should handle multiple conflicts in same sync", () => {
+  it("should handle multiple remote updates when no change log", () => {
     const local = [
-      { title: "A-local", url: "http://a.com", path: ["Folder"], index: 0 },
-      { title: "B", url: "http://b-local.com", path: ["Folder"], index: 1 },
+      { title: "A", url: "http://a.com", path: ["Folder"], index: 0 },
+      { title: "B", url: "http://b.com", path: ["Folder"], index: 1 },
     ];
     const remote = [
-      { title: "A-remote", url: "http://a.com", path: ["Folder"], index: 0 },
-      { title: "B", url: "http://b-remote.com", path: ["Folder"], index: 1 },
+      { title: "A-updated", url: "http://a.com", path: ["Folder"], index: 0 },
+      { title: "B", url: "http://b-updated.com", path: ["Folder"], index: 1 },
     ];
 
-    const result = calcTombstoneChanges(local, remote, []);
+    const result = calcTombstoneChanges(local, remote, [], []);
 
-    expect(result.conflicts).to.have.lengthOf(2);
-
-    const titleConflict = result.conflicts.find(
-      (c) => c.changedAttribute === "title",
-    );
-    const urlConflict = result.conflicts.find(
-      (c) => c.changedAttribute === "url",
-    );
-
-    expect(titleConflict.local.title).to.equal("A-local");
-    expect(titleConflict.remote.title).to.equal("A-remote");
-    expect(urlConflict.local.url).to.equal("http://b-local.com");
-    expect(urlConflict.remote.url).to.equal("http://b-remote.com");
+    // No change log = all are remote updates
+    expect(result.localChanges.updates).to.have.lengthOf(2);
+    expect(result.conflicts).to.be.empty;
   });
 
-  it("should handle conflict alongside new insertions", () => {
+  it("should handle remote update alongside new local insertions", () => {
     const local = [
       {
-        title: "Conflicted",
+        title: "Existing",
         url: "http://example.com",
         path: ["Folder"],
         index: 0,
@@ -884,18 +932,33 @@ describe("3-of-4 Conflict Detection in calcTombstoneChanges", () => {
     ];
     const remote = [
       {
-        title: "Original",
+        title: "Existing-updated",
         url: "http://example.com",
         path: ["Folder"],
         index: 0,
       },
     ];
 
-    const result = calcTombstoneChanges(local, remote, []);
+    // Change log shows NewBookmark was locally created
+    const changeLog = [
+      {
+        type: "created",
+        bookmark: {
+          title: "NewBookmark",
+          url: "http://new.com",
+          path: ["Folder"],
+          index: 1,
+        },
+      },
+    ];
 
-    // Should have one conflict (title difference) and one insertion (new bookmark)
-    expect(result.conflicts).to.have.lengthOf(1);
-    expect(result.conflicts[0].changedAttribute).to.equal("title");
+    const result = calcTombstoneChanges(local, remote, [], changeLog);
+
+    // Remote update (Existing -> Existing-updated) and local insertion (NewBookmark)
+    expect(result.localChanges.updates).to.have.lengthOf(1);
+    expect(result.localChanges.updates[0].newBookmark.title).to.equal(
+      "Existing-updated",
+    );
     expect(result.remoteChanges.insertions).to.have.lengthOf(1);
     expect(result.remoteChanges.insertions[0].title).to.equal("NewBookmark");
   });

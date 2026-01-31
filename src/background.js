@@ -120,6 +120,214 @@ function getTombstones(bookmarks) {
   return bookmarks.filter((b) => b.deleted);
 }
 
+//************************** LOCAL CHANGE TRACKING **************************
+// Get the path for a bookmark by its parent ID
+async function getBookmarkPath(parentId) {
+  const path = [];
+  let currentId = parentId;
+  while (currentId) {
+    try {
+      const [node] = await browser.bookmarks.get(currentId);
+      if (node.title) {
+        path.unshift(node.title);
+      }
+      currentId = node.parentId;
+    } catch (e) {
+      break;
+    }
+  }
+  return path;
+}
+
+// Get stored bookmark ID map
+async function getBookmarkIdMap() {
+  const storage = await browser.storage.local.get(["bookmarkIdMap"]);
+  return storage.bookmarkIdMap || {};
+}
+
+// Save bookmark ID map
+async function saveBookmarkIdMap(bookmarkIdMap) {
+  await browser.storage.local.set({ bookmarkIdMap });
+}
+
+// Get change log
+async function getChangeLog() {
+  const storage = await browser.storage.local.get(["changeLog"]);
+  return storage.changeLog || [];
+}
+
+// Save change log
+async function saveChangeLog(changeLog) {
+  await browser.storage.local.set({ changeLog });
+}
+
+// Clear change log (after successful sync)
+async function clearChangeLog() {
+  await browser.storage.local.set({ changeLog: [] });
+}
+
+// Record a local change
+async function recordChange(type, bookmarkId, info) {
+  const bookmarkIdMap = await getBookmarkIdMap();
+  const changeLog = await getChangeLog();
+
+  const entry = {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    type,
+    bookmarkId,
+    bookmark: null,
+    oldValues: null,
+  };
+
+  switch (type) {
+    case "created": {
+      // info is the full bookmark object from onCreated
+      const path = await getBookmarkPath(info.parentId);
+      entry.bookmark = {
+        title: info.title,
+        path: path,
+        url: info.url,
+        index: info.index,
+      };
+      // Store in ID map for future correlation
+      bookmarkIdMap[bookmarkId] = entry.bookmark;
+      break;
+    }
+
+    case "changed": {
+      // info has {title?, url?} - only changed fields
+      const oldBookmark = bookmarkIdMap[bookmarkId];
+      if (oldBookmark) {
+        entry.oldValues = { ...oldBookmark };
+        entry.bookmark = {
+          ...oldBookmark,
+          title: info.title ?? oldBookmark.title,
+          url: info.url ?? oldBookmark.url,
+        };
+        bookmarkIdMap[bookmarkId] = entry.bookmark;
+      } else {
+        // Bookmark not in map, try to get current state
+        try {
+          const [bm] = await browser.bookmarks.get(bookmarkId);
+          const path = await getBookmarkPath(bm.parentId);
+          entry.bookmark = {
+            title: bm.title,
+            path: path,
+            url: bm.url,
+            index: bm.index,
+          };
+          bookmarkIdMap[bookmarkId] = entry.bookmark;
+        } catch (e) {
+          // Can't get bookmark info
+        }
+      }
+      break;
+    }
+
+    case "moved": {
+      // info has {parentId, index, oldParentId, oldIndex}
+      const oldBm = bookmarkIdMap[bookmarkId];
+      const newPath = await getBookmarkPath(info.parentId);
+      const oldPath = await getBookmarkPath(info.oldParentId);
+      if (oldBm) {
+        entry.oldValues = { path: oldPath, index: info.oldIndex };
+        entry.bookmark = {
+          ...oldBm,
+          path: newPath,
+          index: info.index,
+        };
+        bookmarkIdMap[bookmarkId] = entry.bookmark;
+      } else {
+        // Try to get current state
+        try {
+          const [bm] = await browser.bookmarks.get(bookmarkId);
+          entry.bookmark = {
+            title: bm.title,
+            path: newPath,
+            url: bm.url,
+            index: info.index,
+          };
+          entry.oldValues = { path: oldPath, index: info.oldIndex };
+          bookmarkIdMap[bookmarkId] = entry.bookmark;
+        } catch (e) {
+          // Can't get bookmark info
+        }
+      }
+      break;
+    }
+
+    case "removed": {
+      // info.node has the removed bookmark details
+      const oldBm = bookmarkIdMap[bookmarkId];
+      if (oldBm) {
+        entry.bookmark = oldBm;
+      } else {
+        const path = await getBookmarkPath(info.parentId);
+        entry.bookmark = {
+          title: info.node.title,
+          path: path,
+          url: info.node.url,
+          index: info.index,
+        };
+      }
+      delete bookmarkIdMap[bookmarkId];
+      break;
+    }
+  }
+
+  if (entry.bookmark) {
+    changeLog.push(entry);
+    await saveChangeLog(changeLog);
+  }
+  await saveBookmarkIdMap(bookmarkIdMap);
+}
+
+// Initialize bookmark ID map from current bookmark tree
+async function initializeBookmarkIdMap() {
+  const bookmarkTreeNodes = await browser.bookmarks.getTree();
+  const bookmarkIdMap = {};
+
+  async function walkTree(nodes, path = []) {
+    for (const node of nodes) {
+      if (node.id) {
+        bookmarkIdMap[node.id] = {
+          title: node.title || "",
+          path: path,
+          url: node.url,
+          index: node.index,
+        };
+      }
+
+      if (node.children) {
+        const childPath = node.title ? [...path, node.title] : path;
+        await walkTree(node.children, childPath);
+      }
+    }
+  }
+
+  await walkTree(bookmarkTreeNodes);
+  await saveBookmarkIdMap(bookmarkIdMap);
+}
+
+// Check if a bookmark was locally changed (exists in change log)
+function wasLocallyChanged(bookmark, changeLog) {
+  // Check if any change in the log matches this bookmark by 3-of-4
+  for (const change of changeLog) {
+    if (change.bookmark && matchBookmarks3of4(bookmark, change.bookmark)) {
+      return true;
+    }
+    if (change.oldValues) {
+      // Also check old values for moved/changed bookmarks
+      const oldBm = { ...change.bookmark, ...change.oldValues };
+      if (matchBookmarks3of4(bookmark, oldBm)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 //************************** WEBDAV **************************
 function createWebDAVHeaders(username, password, isWrite = false) {
   const headers = new Headers();
@@ -540,8 +748,13 @@ function find3of4Match(bookmark, bookmarks) {
   return null;
 }
 
-// Calculate changes between local and remote using tombstones
-function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
+// Calculate changes between local and remote using tombstones and change log
+function calcTombstoneChanges(
+  localBookmarks,
+  remoteData,
+  localTombstones,
+  changeLog = [],
+) {
   const remoteBookmarks = getActiveBookmarks(remoteData);
   const remoteTombstones = getTombstones(remoteData);
 
@@ -636,7 +849,7 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
   );
 
   // Now find 3-of-4 matches between unmatched local and remote
-  // These are potential updates or conflicts
+  // Use change log to determine if it's a local change, remote change, or conflict
   const localToProcess = [...stillUnmatchedLocal];
 
   for (const local of localToProcess) {
@@ -648,13 +861,44 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
       const remoteKey = bookmarkIdentityKey(match3of4);
       const changedAttr = findChangedAttribute(match3of4, local);
 
-      // Both local and remote have the bookmark but with different values
-      // This is a conflict - user needs to choose
-      conflicts.push({
-        local: local,
-        remote: match3of4,
-        changedAttribute: changedAttr,
+      // Check if local was changed (exists in change log)
+      const localChanged = wasLocallyChanged(local, changeLog);
+
+      // Check if the remote version EXACTLY matches our old state
+      // (meaning we changed it from that state, and remote hasn't changed)
+      const remoteMatchesOurOldExactly = changeLog.some((change) => {
+        if (change.oldValues && change.bookmark) {
+          // Build the old bookmark state
+          const oldBm = { ...change.bookmark, ...change.oldValues };
+          // Check if remote matches old state exactly (all 4 attributes)
+          return bookmarksEqual(match3of4, oldBm);
+        }
+        return false;
       });
+
+      if (localChanged && !remoteMatchesOurOldExactly) {
+        // Local changed, but remote doesn't match our old state exactly
+        // This means remote also changed - this is a real conflict
+        conflicts.push({
+          local: local,
+          remote: match3of4,
+          changedAttribute: changedAttr,
+        });
+      } else if (localChanged) {
+        // Local changed from the remote state (remote still matches our old) - push to remote
+        remoteChanges.updates.push({
+          oldBookmark: match3of4,
+          newBookmark: local,
+          changedAttribute: changedAttr,
+        });
+      } else {
+        // Local didn't change - remote changed, pull to local
+        localChanges.updates.push({
+          oldBookmark: local,
+          newBookmark: match3of4,
+          changedAttribute: changedAttr,
+        });
+      }
 
       matchedLocalKeys.add(localKey);
       matchedRemoteKeys.add(remoteKey);
@@ -662,8 +906,21 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
       const idx = stillUnmatchedRemote.indexOf(match3of4);
       if (idx !== -1) stillUnmatchedRemote.splice(idx, 1);
     } else {
-      // No match - this is a new local bookmark to push to remote
-      remoteChanges.insertions.push(local);
+      // No match - check if this is a new local bookmark or was locally created
+      const localCreated = changeLog.some(
+        (c) =>
+          c.type === "created" &&
+          c.bookmark &&
+          matchBookmarks3of4(local, c.bookmark),
+      );
+      if (localCreated) {
+        // New local bookmark to push to remote
+        remoteChanges.insertions.push(local);
+      } else {
+        // Bookmark exists locally but not in remote and wasn't just created
+        // Could be an old local bookmark - push to remote anyway
+        remoteChanges.insertions.push(local);
+      }
       matchedLocalKeys.add(localKey);
     }
   }
@@ -717,11 +974,15 @@ async function syncAllBookmarks(
     message: `Last sync: ${formatSyncTime()}`,
   });
 
-  // Calculate changes using tombstones
+  // Get change log for conflict detection
+  const changeLog = await getChangeLog();
+
+  // Calculate changes using tombstones and change log
   const { localChanges, remoteChanges, conflicts } = calcTombstoneChanges(
     localBookmarks,
     remoteData,
     localTombstones,
+    changeLog,
   );
 
   // Check if there are any changes
@@ -818,6 +1079,9 @@ async function loadConfig() {
 
 (async () => {
   try {
+    // Initialize bookmark ID map for change tracking
+    await initializeBookmarkIdMap();
+
     const { url, username, password, checkInterval } = await loadConfig();
     await syncAllBookmarks(url, username, password, false, true);
     setInterval(
@@ -846,39 +1110,31 @@ async function debounceBookmarkSync(localMaster) {
 }
 
 // Listen for user changes to bookmarks
-browser.bookmarks.onChanged.addListener(async () => {
+browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
+  await recordChange("changed", id, changeInfo);
   await debounceBookmarkSync(true);
 });
-browser.bookmarks.onCreated.addListener(async () => {
+
+browser.bookmarks.onCreated.addListener(async (id, bookmark) => {
+  await recordChange("created", id, bookmark);
   await debounceBookmarkSync(true);
 });
-browser.bookmarks.onMoved.addListener(async () => {
+
+browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+  await recordChange("moved", id, moveInfo);
   await debounceBookmarkSync(true);
 });
+
 browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+  await recordChange("removed", id, removeInfo);
+
   // Add tombstone for deleted bookmark
+  const path = await getBookmarkPath(removeInfo.parentId);
   const bookmark = {
     title: removeInfo.node.title,
     url: removeInfo.node.url,
-    path: [], // We'll need to track the path - for now simplified
+    path: path,
   };
-  // Get parent path
-  if (removeInfo.parentId) {
-    try {
-      let currentId = removeInfo.parentId;
-      const path = [];
-      while (currentId) {
-        const [node] = await browser.bookmarks.get(currentId);
-        if (node.title) {
-          path.unshift(node.title);
-        }
-        currentId = node.parentId;
-      }
-      bookmark.path = path;
-    } catch (e) {
-      // Parent might not exist anymore
-    }
-  }
   await addLocalTombstone(bookmark);
   await debounceBookmarkSync(true);
 });
@@ -939,6 +1195,12 @@ async function handleSync(config) {
   // Save merged tombstones locally
   await saveLocalTombstones(allTombstones);
 
+  // Clear change log after successful sync
+  await clearChangeLog();
+
+  // Reinitialize bookmark ID map to current state
+  await initializeBookmarkIdMap();
+
   await closeConfirmationWindow();
 }
 
@@ -954,6 +1216,12 @@ async function handleConflictLocal(config) {
     config.password,
     newRemoteData,
   );
+
+  // Clear change log after successful sync
+  await clearChangeLog();
+
+  // Reinitialize bookmark ID map to current state
+  await initializeBookmarkIdMap();
 
   await closeConfirmationWindow();
 }
@@ -998,6 +1266,12 @@ async function handleConflictRemote(config) {
 
   // Clear local tombstones (we accepted remote)
   await saveLocalTombstones(remoteTombstones);
+
+  // Clear change log after successful sync
+  await clearChangeLog();
+
+  // Reinitialize bookmark ID map to current state
+  await initializeBookmarkIdMap();
 
   await closeConfirmationWindow();
 }
