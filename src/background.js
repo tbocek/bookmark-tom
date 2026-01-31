@@ -504,7 +504,13 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
       );
       try {
         if (id) {
-          await browser.bookmarks.remove(id);
+          // Use removeTree for folders to delete contents recursively
+          const isFolder = !delBookmark.url;
+          if (isFolder) {
+            await browser.bookmarks.removeTree(id);
+          } else {
+            await browser.bookmarks.remove(id);
+          }
         } else {
           console.warn("bookmark not found", delBookmark);
         }
