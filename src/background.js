@@ -530,6 +530,16 @@ async function closeConfirmationWindow() {
 }
 
 //************************** SYNC LOGIC WITH TOMBSTONES **************************
+// Find a 3-of-4 match for a bookmark in an array
+function find3of4Match(bookmark, bookmarks) {
+  for (const candidate of bookmarks) {
+    if (matchBookmarks3of4(bookmark, candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 // Calculate changes between local and remote using tombstones
 function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
   const remoteBookmarks = getActiveBookmarks(remoteData);
@@ -539,7 +549,7 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
   const remoteChanges = { insertions: [], deletions: [], updates: [] };
   const conflicts = [];
 
-  // Build maps for quick lookup
+  // Build maps for quick lookup by identity key
   const localMap = new Map();
   localBookmarks.forEach((b) => localMap.set(bookmarkIdentityKey(b), b));
 
@@ -556,7 +566,11 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
     remoteTombstoneMap.set(bookmarkIdentityKey(t), t),
   );
 
-  // Process local bookmarks
+  // Track matched bookmarks to avoid double-processing
+  const matchedLocalKeys = new Set();
+  const matchedRemoteKeys = new Set();
+
+  // Phase 1: Find exact matches and check for index-only updates
   for (const local of localBookmarks) {
     const key = bookmarkIdentityKey(local);
     const remote = remoteMap.get(key);
@@ -565,42 +579,108 @@ function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
     if (remoteTombstone) {
       // Remote deleted this bookmark - delete locally
       localChanges.deletions.push(local);
+      matchedLocalKeys.add(key);
     } else if (remote) {
-      // Exists in both - check for updates (3-of-4 matching for attribute changes)
+      // Exact identity match - check for index-only updates
+      matchedLocalKeys.add(key);
+      matchedRemoteKeys.add(key);
+
       if (!bookmarksEqual(local, remote)) {
         const changedAttr = findChangedAttribute(local, remote);
-        if (changedAttr) {
-          // Conflict: both have it but different - for now, treat as update from remote
-          // TODO: could add proper conflict detection here
-          localChanges.updates.push({
-            oldBookmark: local,
-            newBookmark: remote,
+        if (changedAttr === "index") {
+          // Index changed - local wins (push to remote)
+          remoteChanges.updates.push({
+            oldBookmark: remote,
+            newBookmark: local,
             changedAttribute: changedAttr,
           });
         }
       }
-    } else {
-      // Only in local, not in remote, no remote tombstone - push to remote
-      remoteChanges.insertions.push(local);
     }
   }
 
-  // Process remote bookmarks not in local
+  // Phase 2: For unmatched local bookmarks, try 3-of-4 matching
+  const unmatchedRemote = remoteBookmarks.filter(
+    (b) => !matchedRemoteKeys.has(bookmarkIdentityKey(b)),
+  );
+
+  for (const local of localBookmarks) {
+    const key = bookmarkIdentityKey(local);
+    if (matchedLocalKeys.has(key)) continue;
+
+    // Check for remote tombstone match
+    const remoteTombstone = remoteTombstoneMap.get(key);
+    if (remoteTombstone) {
+      localChanges.deletions.push(local);
+      matchedLocalKeys.add(key);
+      continue;
+    }
+
+    // Try 3-of-4 matching with unmatched remote bookmarks
+    const match3of4 = find3of4Match(local, unmatchedRemote);
+    if (match3of4) {
+      const remoteKey = bookmarkIdentityKey(match3of4);
+      const changedAttr = findChangedAttribute(match3of4, local);
+
+      // Local changed this bookmark - push update to remote
+      remoteChanges.updates.push({
+        oldBookmark: match3of4,
+        newBookmark: local,
+        changedAttribute: changedAttr,
+      });
+
+      matchedLocalKeys.add(key);
+      matchedRemoteKeys.add(remoteKey);
+      // Remove from unmatchedRemote to avoid re-matching
+      const idx = unmatchedRemote.indexOf(match3of4);
+      if (idx !== -1) unmatchedRemote.splice(idx, 1);
+    } else {
+      // No match - this is a new local bookmark to push to remote
+      remoteChanges.insertions.push(local);
+      matchedLocalKeys.add(key);
+    }
+  }
+
+  // Phase 3: For unmatched remote bookmarks, try 3-of-4 matching with local
+  const unmatchedLocal = localBookmarks.filter(
+    (b) => !matchedLocalKeys.has(bookmarkIdentityKey(b)),
+  );
+
   for (const remote of remoteBookmarks) {
     const key = bookmarkIdentityKey(remote);
-    const local = localMap.get(key);
-    const localTombstone = localTombstoneMap.get(key);
+    if (matchedRemoteKeys.has(key)) continue;
 
-    if (!local) {
-      if (localTombstone) {
-        // Local deleted this bookmark - push tombstone to remote
-        remoteChanges.deletions.push(remote);
-      } else {
-        // Only in remote, not in local, no local tombstone - pull to local
-        localChanges.insertions.push(remote);
-      }
+    // Check for local tombstone match
+    const localTombstone = localTombstoneMap.get(key);
+    if (localTombstone) {
+      remoteChanges.deletions.push(remote);
+      matchedRemoteKeys.add(key);
+      continue;
     }
-    // If local exists, already handled above
+
+    // Try 3-of-4 matching with unmatched local bookmarks
+    const match3of4 = find3of4Match(remote, unmatchedLocal);
+    if (match3of4) {
+      const localKey = bookmarkIdentityKey(match3of4);
+      const changedAttr = findChangedAttribute(match3of4, remote);
+
+      // Remote changed this bookmark - pull update to local
+      localChanges.updates.push({
+        oldBookmark: match3of4,
+        newBookmark: remote,
+        changedAttribute: changedAttr,
+      });
+
+      matchedRemoteKeys.add(key);
+      matchedLocalKeys.add(localKey);
+      // Remove from unmatchedLocal to avoid re-matching
+      const idx = unmatchedLocal.indexOf(match3of4);
+      if (idx !== -1) unmatchedLocal.splice(idx, 1);
+    } else {
+      // No match - this is a new remote bookmark to pull to local
+      localChanges.insertions.push(remote);
+      matchedRemoteKeys.add(key);
+    }
   }
 
   return { localChanges, remoteChanges, conflicts };
@@ -990,4 +1070,5 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   getActiveBookmarks,
   getTombstones,
   bookmarkIdentityKey,
+  find3of4Match,
 });

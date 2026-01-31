@@ -710,6 +710,249 @@ describe("Multi-Machine Scenarios (3 machines)", () => {
   });
 });
 
+describe("3-of-4 Update Detection in calcTombstoneChanges", () => {
+  it("should detect local title change as update to remote (not insert/delete)", () => {
+    // User changes title from X to X2 locally
+    const localBookmark = {
+      title: "X2",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "X",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    // Should be an update to remote, not separate insert/delete
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].oldBookmark.title).to.equal("X");
+    expect(result.remoteChanges.updates[0].newBookmark.title).to.equal("X2");
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("title");
+
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.remoteChanges.deletions).to.be.empty;
+  });
+
+  it("should detect local URL change as update to remote", () => {
+    const localBookmark = {
+      title: "Test",
+      url: "http://new-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "Test",
+      url: "http://old-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("url");
+    expect(result.remoteChanges.updates[0].newBookmark.url).to.equal(
+      "http://new-url.com",
+    );
+
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+  });
+
+  it("should detect local path change (move) as update to remote", () => {
+    const localBookmark = {
+      title: "Test",
+      url: "http://example.com",
+      path: ["NewFolder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "Test",
+      url: "http://example.com",
+      path: ["OldFolder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("path");
+    expect(result.remoteChanges.updates[0].newBookmark.path).to.deep.equal([
+      "NewFolder",
+    ]);
+
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+  });
+
+  it("should detect 3-of-4 match as update to remote (local wins by default)", () => {
+    // When local and remote differ but match 3-of-4, local wins (pushes to remote)
+    // This is because without change tracking, we can't know which side changed
+    const localBookmark = {
+      title: "X",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "X2",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    // Local wins - push local state to remote
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].oldBookmark.title).to.equal("X2");
+    expect(result.remoteChanges.updates[0].newBookmark.title).to.equal("X");
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("title");
+
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.localChanges.updates).to.be.empty;
+  });
+
+  it("should detect 3-of-4 URL match as update to remote (local wins)", () => {
+    const localBookmark = {
+      title: "Test",
+      url: "http://old-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "Test",
+      url: "http://new-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    // Local wins - push local URL to remote
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("url");
+    expect(result.remoteChanges.updates[0].newBookmark.url).to.equal(
+      "http://old-url.com",
+    );
+    expect(result.localChanges.updates).to.be.empty;
+  });
+
+  it("should detect index-only change as update to remote (local wins)", () => {
+    // When identity matches but index differs, local wins
+    const localBookmark = {
+      title: "Test",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 5,
+    };
+    const remoteBookmark = {
+      title: "Test",
+      url: "http://example.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("index");
+    expect(result.remoteChanges.updates[0].newBookmark.index).to.equal(5);
+
+    expect(result.localChanges.updates).to.be.empty;
+  });
+
+  it("should NOT match as update when 2 or more attributes differ", () => {
+    // Title and URL both changed - should be treated as insert/delete
+    const localBookmark = {
+      title: "NewTitle",
+      url: "http://new-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+    const remoteBookmark = {
+      title: "OldTitle",
+      url: "http://old-url.com",
+      path: ["Folder"],
+      index: 0,
+    };
+
+    const result = calcTombstoneChanges([localBookmark], [remoteBookmark], []);
+
+    // Should be separate insert and delete, not update
+    expect(result.remoteChanges.updates).to.be.empty;
+    expect(result.localChanges.updates).to.be.empty;
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(result.localChanges.insertions).to.have.lengthOf(1);
+  });
+
+  it("should handle multiple updates in same sync", () => {
+    const local = [
+      { title: "A-updated", url: "http://a.com", path: ["Folder"], index: 0 },
+      { title: "B", url: "http://b-updated.com", path: ["Folder"], index: 1 },
+    ];
+    const remote = [
+      { title: "A", url: "http://a.com", path: ["Folder"], index: 0 },
+      { title: "B", url: "http://b.com", path: ["Folder"], index: 1 },
+    ];
+
+    const result = calcTombstoneChanges(local, remote, []);
+
+    expect(result.remoteChanges.updates).to.have.lengthOf(2);
+
+    const titleUpdate = result.remoteChanges.updates.find(
+      (u) => u.changedAttribute === "title",
+    );
+    const urlUpdate = result.remoteChanges.updates.find(
+      (u) => u.changedAttribute === "url",
+    );
+
+    expect(titleUpdate.newBookmark.title).to.equal("A-updated");
+    expect(urlUpdate.newBookmark.url).to.equal("http://b-updated.com");
+  });
+
+  it("should handle update alongside new insertions", () => {
+    const local = [
+      {
+        title: "Updated",
+        url: "http://example.com",
+        path: ["Folder"],
+        index: 0,
+      },
+      {
+        title: "NewBookmark",
+        url: "http://new.com",
+        path: ["Folder"],
+        index: 1,
+      },
+    ];
+    const remote = [
+      {
+        title: "Original",
+        url: "http://example.com",
+        path: ["Folder"],
+        index: 0,
+      },
+    ];
+
+    const result = calcTombstoneChanges(local, remote, []);
+
+    // Should have one update (title change) and one insertion (new bookmark)
+    expect(result.remoteChanges.updates).to.have.lengthOf(1);
+    expect(result.remoteChanges.updates[0].changedAttribute).to.equal("title");
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(result.remoteChanges.insertions[0].title).to.equal("NewBookmark");
+  });
+});
+
 describe("Edge Cases", () => {
   it("should handle empty bookmarks on all sides", () => {
     const result = calcTombstoneChanges([], [], []);
