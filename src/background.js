@@ -125,6 +125,14 @@ async function syncAllBookmarks(
   localMaster,
   fromBackgroundTimer,
 ) {
+  // Check if configured
+  if (!url) {
+    await browser.storage.local.set({
+      message: "Not configured - set WebDAV URL in options",
+    });
+    return;
+  }
+
   // Get current local state
   const localBookmarks = await getLocalBookmarksSnapshot();
   const localTombstones = await getLocalTombstones();

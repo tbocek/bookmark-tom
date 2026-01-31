@@ -18,12 +18,25 @@ function addCacheBuster(url) {
 }
 
 async function fetchWebDAV(url, username, password) {
+  if (!url) {
+    console.warn("fetchWebDAV: No URL configured");
+    return null;
+  }
+
   const headers = createWebDAVHeaders(username, password);
 
   try {
     const response = await fetch(addCacheBuster(url), {
       headers,
       credentials: "omit",
+    });
+
+    console.log("WebDAV fetch:", {
+      url,
+      urlType: typeof url,
+      urlLength: url ? url.length : 0,
+      status: response.status,
+      ok: response.ok,
     });
 
     if (response.status === 404) {
@@ -33,7 +46,14 @@ async function fetchWebDAV(url, username, password) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    console.log("WebDAV response (first 200 chars):", text.substring(0, 200));
+
+    if (!text || text.trim() === "") {
+      return null;
+    }
+
+    const data = JSON.parse(text);
     return Array.isArray(data) ? data : null;
   } catch (error) {
     console.error("Error fetching from WebDAV:", error);
@@ -57,17 +77,19 @@ async function updateWebDAV(url, username, password, bookmarks) {
 }
 
 async function loadConfig() {
-  const result = await browser.storage.local.get([
+  const result = await browser.storage.sync.get([
     "webdavUrl",
     "webdavUsername",
     "webdavPassword",
-    "syncEnabled",
+    "checkIntervalMinutes",
   ]);
+
+  console.log("loadConfig result:", result);
 
   return {
     url: result.webdavUrl || "",
     username: result.webdavUsername || "",
     password: result.webdavPassword || "",
-    syncEnabled: result.syncEnabled !== false,
+    checkInterval: parseInt(result.checkIntervalMinutes, 10) || 5,
   };
 }

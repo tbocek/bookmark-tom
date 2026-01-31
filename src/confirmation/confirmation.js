@@ -1,3 +1,69 @@
+// Check if two bookmarks match by 3-of-4 attributes, or by title+url (for moves)
+function matchForDisplay(a, b) {
+  if (!a || !b) return false;
+
+  // Title + URL match = same bookmark (handles moves)
+  if (a.title === b.title && (a.url || "") === (b.url || "")) {
+    return true;
+  }
+
+  // Otherwise use 3-of-4
+  let matches = 0;
+  if (a.title === b.title) matches++;
+  if ((a.url || "") === (b.url || "")) matches++;
+  const pathA = (a.path || []).join("/");
+  const pathB = (b.path || []).join("/");
+  if (pathA === pathB) matches++;
+  if (a.index === b.index) matches++;
+  return matches >= 3;
+}
+
+// Find which attribute differs between two bookmarks
+function findChangedAttribute(a, b) {
+  if (a.title !== b.title) return "title";
+  if ((a.url || "") !== (b.url || "")) return "url";
+  const pathA = (a.path || []).join("/");
+  const pathB = (b.path || []).join("/");
+  if (pathA !== pathB) return "path";
+  if (a.index !== b.index) return "index";
+  return null;
+}
+
+// Convert 3-of-4 matching insert/delete pairs into updates for display
+function groupChangesForDisplay(changes) {
+  const insertions = [...(changes.insertions || [])];
+  const deletions = [...(changes.deletions || [])];
+  const updates = [...(changes.updates || [])];
+
+  const remainingInsertions = [];
+  const remainingDeletions = [];
+
+  // For each insertion, try to find a matching deletion (3-of-4 or title+url)
+  for (const ins of insertions) {
+    const matchIdx = deletions.findIndex((del) => matchForDisplay(ins, del));
+    if (matchIdx !== -1) {
+      const del = deletions.splice(matchIdx, 1)[0];
+      const attr = findChangedAttribute(del, ins);
+      updates.push({
+        oldBookmark: del,
+        newBookmark: ins,
+        changedAttribute: attr,
+      });
+    } else {
+      remainingInsertions.push(ins);
+    }
+  }
+
+  // Remaining deletions that didn't match
+  remainingDeletions.push(...deletions);
+
+  return {
+    insertions: remainingInsertions,
+    deletions: remainingDeletions,
+    updates,
+  };
+}
+
 document.addEventListener("DOMContentLoaded", async function () {
   const storageData = await browser.storage.local.get([
     "localChanges",
@@ -5,7 +71,11 @@ document.addEventListener("DOMContentLoaded", async function () {
     "action",
     "conflicts",
   ]);
-  const { localChanges, remoteChanges, action, conflicts } = storageData;
+  let { localChanges, remoteChanges, action, conflicts } = storageData;
+
+  // Group 3-of-4 matching insert/delete pairs as updates for display
+  localChanges = groupChangesForDisplay(localChanges || {});
+  remoteChanges = groupChangesForDisplay(remoteChanges || {});
 
   const insertionsLocalDiv = document.getElementById("insertions-local");
   const insertionsRemoteDiv = document.getElementById("insertions-remote");
