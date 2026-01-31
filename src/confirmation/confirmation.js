@@ -1,13 +1,11 @@
 document.addEventListener("DOMContentLoaded", async function () {
   const storageData = await browser.storage.local.get([
-    "insertions",
-    "deletions",
-    "updateIndexes",
+    "localChanges",
+    "remoteChanges",
     "action",
     "conflicts",
   ]);
-  const { insertions, deletions, updateIndexes, action, conflicts } =
-    storageData;
+  const { localChanges, remoteChanges, action, conflicts } = storageData;
 
   const insertionsDiv = document.getElementById("insertions");
   const deletionsDiv = document.getElementById("deletions");
@@ -19,11 +17,8 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   const spinner1 = document.getElementById("spinner1");
 
-  const cloudToMachineSVG = "../icons/cloud2machine.svg";
-  const machineToCloudSVG = "../icons/machine2cloud.svg";
-
-  directionImg.src =
-    action === "Local Update" ? cloudToMachineSVG : machineToCloudSVG;
+  // Hide direction image for bidirectional sync
+  directionImg.classList.add("display-none");
 
   // Helper to append URL span to a list item
   function appendUrlSpan(li, url) {
@@ -162,25 +157,75 @@ document.addEventListener("DOMContentLoaded", async function () {
     return section;
   }
 
-  if (insertions && insertions.length > 0) {
-    insertionsDiv.appendChild(createSection(`Insert (${action}):`, insertions));
+  // Combine local and remote changes for display
+  const allInsertions = [
+    ...(localChanges?.insertions || []).map((b) => ({
+      ...b,
+      direction: "local",
+    })),
+    ...(remoteChanges?.insertions || []).map((b) => ({
+      ...b,
+      direction: "remote",
+    })),
+  ];
+  const allDeletions = [
+    ...(localChanges?.deletions || []).map((b) => ({
+      ...b,
+      direction: "local",
+    })),
+    ...(remoteChanges?.deletions || []).map((b) => ({
+      ...b,
+      direction: "remote",
+    })),
+  ];
+  const allReorders = [
+    ...(localChanges?.updateIndexes || []).map((b) => ({
+      ...b,
+      direction: "local",
+    })),
+    ...(remoteChanges?.updateIndexes || []).map((b) => ({
+      ...b,
+      direction: "remote",
+    })),
+  ];
+
+  function createDirectionalListItem(bookmark) {
+    const directionLabel =
+      bookmark.direction === "local" ? " (from remote)" : " (to remote)";
+    const span = document.createElement("span");
+    span.classList.add("direction-label");
+    span.textContent = directionLabel;
+    return createBookmarkListItem(bookmark, { afterTitle: span });
+  }
+
+  function createDirectionalReorderItem(bookmark) {
+    const indexSpan = document.createElement("span");
+    indexSpan.classList.add("index-change");
+    const directionLabel =
+      bookmark.direction === "local" ? " (from remote)" : " (to remote)";
+    indexSpan.textContent = ` (position: ${bookmark.oldIndex} → ${bookmark.index})${directionLabel}`;
+    return createBookmarkListItem(bookmark, { afterTitle: indexSpan });
+  }
+
+  if (allInsertions.length > 0) {
+    insertionsDiv.appendChild(
+      createSection("Insert:", allInsertions, createDirectionalListItem),
+    );
   } else {
     insertionsDiv.remove();
   }
 
-  if (deletions && deletions.length > 0) {
-    deletionsDiv.appendChild(createSection(`Delete (${action}):`, deletions));
+  if (allDeletions.length > 0) {
+    deletionsDiv.appendChild(
+      createSection("Delete:", allDeletions, createDirectionalListItem),
+    );
   } else {
     deletionsDiv.remove();
   }
 
-  if (updateIndexes && updateIndexes.length > 0) {
+  if (allReorders.length > 0) {
     reordersDiv.appendChild(
-      createSection(
-        `Reordered (${action}):`,
-        updateIndexes,
-        createReorderListItem,
-      ),
+      createSection("Reordered:", allReorders, createDirectionalReorderItem),
     );
   } else {
     reordersDiv.remove();
@@ -193,7 +238,6 @@ document.addEventListener("DOMContentLoaded", async function () {
     // Show conflict buttons, hide normal buttons
     normalButtons.classList.add("display-none");
     conflictButtons.classList.remove("display-none");
-    directionImg.classList.add("display-none");
   } else {
     conflictsDiv.remove();
   }
@@ -208,7 +252,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     .getElementById("confirm-force")
     .addEventListener("click", function () {
       showSpinner(spinner1);
-      browser.runtime.sendMessage({ action: action });
+      browser.runtime.sendMessage({ action: "Sync" });
     });
 
   document.getElementById("cancel").addEventListener("click", function () {

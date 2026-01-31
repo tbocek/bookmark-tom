@@ -1,7 +1,6 @@
 //************************** CONSTANTS **************************
 const ACTIONS = {
-  LOCAL_UPDATE: "Local Update",
-  REMOTE_UPDATE: "Remote Update",
+  SYNC: "Sync",
   CONFLICT: "Conflict",
   CONFLICT_LOCAL: "Conflict-local",
   CONFLICT_REMOTE: "Conflict-remote",
@@ -374,13 +373,12 @@ async function displayConfirmationPage(
   oldBookmarks = null,
   conflicts = [],
 ) {
-  const { insertions, deletions, updateIndexes } = changes;
+  const { localChanges, remoteChanges } = changes;
 
   // Store changes and context in the browser's local storage
-  browser.storage.local.set({
-    insertions: insertions,
-    deletions: deletions,
-    updateIndexes: updateIndexes,
+  await browser.storage.local.set({
+    localChanges: localChanges,
+    remoteChanges: remoteChanges,
     action: action,
     localBookmarks: localBookmarks,
     remoteBookmarks: remoteBookmarks,
@@ -452,9 +450,8 @@ async function closeConfirmationWindow() {
 
   // Clear stored data
   await browser.storage.local.remove([
-    "insertions",
-    "deletions",
-    "updateIndexes",
+    "localChanges",
+    "remoteChanges",
     "action",
     "localBookmarks",
     "remoteBookmarks",
@@ -530,41 +527,26 @@ async function syncAllBookmarks(
   const showConfirmation = async () => {
     if (threeWayResult.conflicts.length > 0) {
       // Has conflicts - show conflict resolution UI
-      const changes = {
-        insertions: [],
-        deletions: [],
-        updateIndexes: [],
-      };
       await displayConfirmationPage(
-        changes,
+        {
+          localChanges: { insertions: [], deletions: [], updateIndexes: [] },
+          remoteChanges: { insertions: [], deletions: [], updateIndexes: [] },
+        },
         "Conflict",
         localBookmarks,
         remoteBookmarks ? remoteBookmarks : [],
         oldBookmarks,
         threeWayResult.conflicts,
       );
-    } else if (localMaster || !remoteBookmarks) {
-      // Local master - push changes to remote
-      const changes = convertThreeWayToChanges(threeWayResult, "push");
-      console.log("three-way changes (local master):", changes);
+    } else {
+      // Show all changes (both directions)
+      const changes = convertThreeWayToChanges(threeWayResult);
+      console.log("three-way changes:", changes);
       await displayConfirmationPage(
         changes,
-        "Remote Update",
+        "Sync",
         localBookmarks,
         remoteBookmarks ? remoteBookmarks : [],
-        oldBookmarks,
-        [],
-      );
-    } else {
-      // Remote master - pull changes to local
-      const changes = convertThreeWayToChanges(threeWayResult, "pull");
-      console.log("three-way changes (remote master):", changes);
-      console.log("threeWayResult:", threeWayResult);
-      await displayConfirmationPage(
-        changes,
-        "Local Update",
-        localBookmarks,
-        remoteBookmarks,
         oldBookmarks,
         [],
       );
@@ -910,42 +892,59 @@ function calcThreeWayChanges(localBookmarks, remoteBookmarks, oldBookmarks) {
 }
 
 // Convert three-way result to changes format
-function convertThreeWayToChanges(threeWayResult, direction) {
-  const insertions = [];
-  const deletions = [];
-  const updateIndexes = [];
+function convertThreeWayToChanges(threeWayResult) {
+  const localChanges = { insertions: [], deletions: [], updateIndexes: [] };
+  const remoteChanges = { insertions: [], deletions: [], updateIndexes: [] };
 
-  const changes =
-    direction === "pull"
-      ? threeWayResult.pullFromRemote
-      : threeWayResult.pushToRemote;
-
-  for (const change of changes) {
+  // Process changes to apply locally (from remote)
+  for (const change of threeWayResult.pullFromRemote) {
     if (change.type === "insert") {
-      insertions.push(change.bookmark);
+      localChanges.insertions.push(change.bookmark);
     } else if (change.type === "delete") {
-      deletions.push(change.bookmark);
+      localChanges.deletions.push(change.bookmark);
     } else if (change.type === "update") {
-      // Check if it's just an index change
       const isIndexOnly =
         change.bookmark.title === change.oldBookmark.title &&
         (change.bookmark.url || "") === (change.oldBookmark.url || "") &&
         arraysEqual(change.bookmark.path || [], change.oldBookmark.path || []);
 
       if (isIndexOnly) {
-        updateIndexes.push({
+        localChanges.updateIndexes.push({
           ...change.bookmark,
           oldIndex: change.oldBookmark.index,
         });
       } else {
-        // More significant change - delete old, insert new
-        deletions.push(change.oldBookmark);
-        insertions.push(change.bookmark);
+        localChanges.deletions.push(change.oldBookmark);
+        localChanges.insertions.push(change.bookmark);
       }
     }
   }
 
-  return { insertions, deletions, updateIndexes };
+  // Process changes to apply remotely (from local)
+  for (const change of threeWayResult.pushToRemote) {
+    if (change.type === "insert") {
+      remoteChanges.insertions.push(change.bookmark);
+    } else if (change.type === "delete") {
+      remoteChanges.deletions.push(change.bookmark);
+    } else if (change.type === "update") {
+      const isIndexOnly =
+        change.bookmark.title === change.oldBookmark.title &&
+        (change.bookmark.url || "") === (change.oldBookmark.url || "") &&
+        arraysEqual(change.bookmark.path || [], change.oldBookmark.path || []);
+
+      if (isIndexOnly) {
+        remoteChanges.updateIndexes.push({
+          ...change.bookmark,
+          oldIndex: change.oldBookmark.index,
+        });
+      } else {
+        remoteChanges.deletions.push(change.oldBookmark);
+        remoteChanges.insertions.push(change.bookmark);
+      }
+    }
+  }
+
+  return { localChanges, remoteChanges };
 }
 
 async function loadConfig() {
@@ -1040,20 +1039,29 @@ async function getLocalBookmarksSnapshot() {
   return retrieveLocalBookmarks(bookmarkTreeNodes);
 }
 
-async function handleLocalUpdate(config) {
-  const { insertions, deletions, remoteBookmarks } =
-    await browser.storage.local.get([
-      "insertions",
-      "deletions",
-      "remoteBookmarks",
-    ]);
-  await modifyLocalBookmarks(deletions, insertions);
+async function handleSync(config) {
+  const { localChanges, remoteBookmarks } = await browser.storage.local.get([
+    "localChanges",
+    "remoteBookmarks",
+  ]);
 
-  const localBookmarks = await getLocalBookmarksSnapshot();
-  const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
-  await applyLocalBookmarkUpdates(changes.updateIndexes);
+  // Apply remote changes to local (localChanges = changes from remote to apply locally)
+  if (localChanges) {
+    await modifyLocalBookmarks(localChanges.deletions, localChanges.insertions);
+    await applyLocalBookmarkUpdates(localChanges.updateIndexes);
+  }
 
+  // Get final local state and push to remote (includes local changes)
   const finalBookmarks = await getLocalBookmarksSnapshot();
+
+  // Update both remote files
+  await updateWebDAV(
+    config.url,
+    config.username,
+    config.password,
+    finalBookmarks,
+    false,
+  );
   await updateWebDAV(
     config.url,
     config.username,
@@ -1061,28 +1069,7 @@ async function handleLocalUpdate(config) {
     finalBookmarks,
     true,
   );
-  await closeConfirmationWindow();
-}
 
-async function handleRemoteUpdate(config) {
-  const { updateIndexes } = await browser.storage.local.get(["updateIndexes"]);
-  await applyLocalBookmarkUpdates(updateIndexes);
-
-  const localBookmarks = await getLocalBookmarksSnapshot();
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    localBookmarks,
-    false,
-  );
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    localBookmarks,
-    true,
-  );
   await closeConfirmationWindow();
 }
 
@@ -1148,8 +1135,7 @@ async function handleSyncAllBookmarks(config, sendResponse) {
 }
 
 const messageHandlers = {
-  [ACTIONS.LOCAL_UPDATE]: handleLocalUpdate,
-  [ACTIONS.REMOTE_UPDATE]: handleRemoteUpdate,
+  [ACTIONS.SYNC]: handleSync,
   [ACTIONS.CONFLICT_LOCAL]: handleConflictLocal,
   [ACTIONS.CONFLICT_REMOTE]: handleConflictRemote,
   [ACTIONS.CANCEL]: async () => closeConfirmationWindow(),
