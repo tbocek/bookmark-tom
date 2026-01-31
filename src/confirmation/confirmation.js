@@ -34,16 +34,27 @@ function findChangedAttribute(a, b) {
 
 // Convert 3-of-4 matching insert/delete pairs into updates for display
 function groupChangesForDisplay(changes) {
-  const insertions = [...(changes.insertions || [])];
-  const deletions = [...(changes.deletions || [])];
+  let insertions = [...(changes.insertions || [])];
+  let deletions = [...(changes.deletions || [])];
   const updates = [...(changes.updates || [])];
 
-  const remainingInsertions = [];
-  const remainingDeletions = [];
+  // Helper to check same title + path (position change)
+  const isSameTitlePath = (a, b) => {
+    if (a.title !== b.title) return false;
+    const pathA = (a.path || []).join("/");
+    const pathB = (b.path || []).join("/");
+    return pathA === pathB;
+  };
 
-  // For each insertion, try to find a matching deletion (3-of-4 or title+url)
+  // Helper to check same title + url (move)
+  const isSameTitleUrl = (a, b) => {
+    return a.title === b.title && (a.url || "") === (b.url || "");
+  };
+
+  // PASS 1: Match position changes first (same title + path, different index)
+  let remainingInsertions = [];
   for (const ins of insertions) {
-    const matchIdx = deletions.findIndex((del) => matchForDisplay(ins, del));
+    const matchIdx = deletions.findIndex((del) => isSameTitlePath(ins, del));
     if (matchIdx !== -1) {
       const del = deletions.splice(matchIdx, 1)[0];
       const attr = findChangedAttribute(del, ins);
@@ -57,12 +68,27 @@ function groupChangesForDisplay(changes) {
     }
   }
 
-  // Remaining deletions that didn't match
-  remainingDeletions.push(...deletions);
+  // PASS 2: Match moves (same title + url, different path)
+  insertions = remainingInsertions;
+  remainingInsertions = [];
+  for (const ins of insertions) {
+    const matchIdx = deletions.findIndex((del) => isSameTitleUrl(ins, del));
+    if (matchIdx !== -1) {
+      const del = deletions.splice(matchIdx, 1)[0];
+      const attr = findChangedAttribute(del, ins);
+      updates.push({
+        oldBookmark: del,
+        newBookmark: ins,
+        changedAttribute: attr,
+      });
+    } else {
+      remainingInsertions.push(ins);
+    }
+  }
 
   return {
     insertions: remainingInsertions,
-    deletions: remainingDeletions,
+    deletions: deletions,
     updates,
   };
 }

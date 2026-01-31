@@ -203,6 +203,17 @@ async function syncAllBookmarks(
   // Current remote state
   const currentRemoteState = remoteData;
 
+  // If no baseline exists (first sync or cleared storage), local is master
+  // Push local to remote and set baseline
+  if (!oldRemoteState || oldRemoteState.length === 0) {
+    await updateWebDAV(url, username, password, localBookmarks);
+    await saveLastSyncedState(localBookmarks);
+    await browser.storage.local.set({
+      message: `Initial sync (local master): ${formatSyncTime()}`,
+    });
+    return;
+  }
+
   // Calculate changes using 3-state sync algorithm
   const { localChanges, remoteChanges, conflicts, newState } = calcSyncChanges(
     oldRemoteState,
