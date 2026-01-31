@@ -1848,6 +1848,53 @@ async function handleSyncAllBookmarks(config, sendResponse) {
   }
 }
 
+async function handleClearRemoteTombstones(config, maxAgeDays) {
+  try {
+    // Fetch current remote data
+    const remoteData = await fetchWebDAV(
+      config.url,
+      config.username,
+      config.password,
+    );
+
+    if (remoteData === null) {
+      return { success: true, clearedRemote: 0 };
+    }
+
+    const remoteBookmarks = getActiveBookmarks(remoteData);
+    const remoteTombstones = getTombstones(remoteData);
+
+    let remainingTombstones;
+    if (maxAgeDays === 0) {
+      // Clear all
+      remainingTombstones = [];
+    } else {
+      // Clear older than X days
+      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      remainingTombstones = remoteTombstones.filter(
+        (t) => now - t.deletedAt < maxAgeMs,
+      );
+    }
+
+    const clearedRemote = remoteTombstones.length - remainingTombstones.length;
+
+    // Update remote with filtered tombstones
+    const newRemoteData = [...remoteBookmarks, ...remainingTombstones];
+    await updateWebDAV(
+      config.url,
+      config.username,
+      config.password,
+      newRemoteData,
+    );
+
+    return { success: true, clearedRemote };
+  } catch (error) {
+    console.error("Error clearing remote tombstones:", error);
+    return { success: false, error: error.message };
+  }
+}
+
 const messageHandlers = {
   [ACTIONS.SYNC]: handleSync,
   [ACTIONS.CONFLICT_LOCAL]: handleConflictLocal,
@@ -1863,9 +1910,12 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       await messageHandlers[message.action](config);
     } else if (message.command === "syncAllBookmarks") {
       await handleSyncAllBookmarks(config, sendResponse);
+    } else if (message.command === "clearRemoteTombstones") {
+      return await handleClearRemoteTombstones(config, message.maxAgeDays);
     }
   } catch (error) {
     console.error("Error in message handler:", error);
+    return { success: false, error: error.message };
   }
   return true;
 });

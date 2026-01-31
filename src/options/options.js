@@ -159,6 +159,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   clearTombstonesButton.addEventListener("click", async () => {
     const maxAgeDays = parseInt(tombstoneAgeSelect.value, 10);
+
+    // Clear local tombstones
     const storage = await browser.storage.local.get(["tombstones"]);
     const tombstones = storage.tombstones || [];
 
@@ -173,9 +175,23 @@ document.addEventListener("DOMContentLoaded", () => {
       remaining = tombstones.filter((t) => now - t.deletedAt < maxAgeMs);
     }
 
-    const cleared = tombstones.length - remaining.length;
+    const clearedLocal = tombstones.length - remaining.length;
     await browser.storage.local.set({ tombstones: remaining });
     await updateTombstoneCount();
-    statusDiv.innerText = `Cleared ${cleared} tombstone${cleared !== 1 ? "s" : ""}.`;
+
+    // Clear remote tombstones via background script
+    try {
+      const result = await browser.runtime.sendMessage({
+        command: "clearRemoteTombstones",
+        maxAgeDays: maxAgeDays,
+      });
+      if (result && result.success) {
+        statusDiv.innerText = `Cleared ${clearedLocal} local and ${result.clearedRemote} remote tombstone${result.clearedRemote !== 1 ? "s" : ""}.`;
+      } else {
+        statusDiv.innerText = `Cleared ${clearedLocal} local tombstone${clearedLocal !== 1 ? "s" : ""}. Remote clear failed: ${result?.error || "unknown error"}`;
+      }
+    } catch (error) {
+      statusDiv.innerText = `Cleared ${clearedLocal} local tombstone${clearedLocal !== 1 ? "s" : ""}. Remote clear failed: ${error.message}`;
+    }
   });
 });

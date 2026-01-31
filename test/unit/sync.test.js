@@ -2492,6 +2492,87 @@ describe("Move Bookmark to Subfolder", () => {
     expect(result.conflicts).to.be.empty;
   });
 
+  it("should not show duplicate deletions when moving into folder with existing content", () => {
+    // Remote: A/a2, A/a3, b
+    // M2: Move b to A - sync
+    // Should NOT show 2x delete
+
+    // Local state after move: b is now inside A
+    const localBookmarks = [
+      { title: "A", path: ["Toolbar"], index: 0 },
+      { title: "a2", url: "http://a2.com", path: ["Toolbar", "A"], index: 0 },
+      { title: "a3", url: "http://a3.com", path: ["Toolbar", "A"], index: 1 },
+      { title: "b", url: "http://b.com", path: ["Toolbar", "A"], index: 2 },
+    ];
+
+    // Remote state: b is still at root
+    const remoteData = [
+      { title: "A", path: ["Toolbar"], index: 0 },
+      { title: "a2", url: "http://a2.com", path: ["Toolbar", "A"], index: 0 },
+      { title: "a3", url: "http://a3.com", path: ["Toolbar", "A"], index: 1 },
+      { title: "b", url: "http://b.com", path: ["Toolbar"], index: 1 },
+    ];
+
+    // Local tombstone for old location of b (created by move)
+    const localTombstones = [
+      {
+        title: "b",
+        url: "http://b.com",
+        path: ["Toolbar"],
+        index: 1,
+        deleted: true,
+        deletedAt: Date.now(),
+      },
+    ];
+
+    // Change log shows the move
+    const changeLog = [
+      {
+        type: "moved",
+        bookmark: {
+          title: "b",
+          url: "http://b.com",
+          path: ["Toolbar", "A"],
+          index: 2,
+        },
+        oldValues: {
+          path: ["Toolbar"],
+          index: 1,
+        },
+      },
+    ];
+
+    const lastSyncedState = [...remoteData];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      changeLog,
+      lastSyncedState,
+    );
+
+    // Should have exactly ONE remote deletion (old location of b)
+    expect(result.remoteChanges.deletions).to.have.lengthOf(1);
+    expect(result.remoteChanges.deletions[0].title).to.equal("b");
+    expect(result.remoteChanges.deletions[0].path).to.deep.equal(["Toolbar"]);
+
+    // Should have exactly ONE remote insertion (new location of b)
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(result.remoteChanges.insertions[0].title).to.equal("b");
+    expect(result.remoteChanges.insertions[0].path).to.deep.equal([
+      "Toolbar",
+      "A",
+    ]);
+
+    // No local changes needed
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.localChanges.insertions).to.be.empty;
+
+    // No conflicts
+    expect(result.conflicts).to.be.empty;
+  });
+
   it("should handle move on Machine A, sync on Machine B (no duplicates)", () => {
     // Machine A moves "b" from root to subfolder, syncs (creates tombstone for old location)
     // Machine B still has "b" at old location, syncs
