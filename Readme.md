@@ -55,44 +55,271 @@ For remote changes:
 
 ![remote](remote.png)
 
-## Local Update Process Details
+## Synchronization Algorithm
 
-The local update process involves taking bookmarks from the remote WebDAV server and applying them to your local Firefox bookmarks. This process is initiated when the user chooses to update their local bookmarks based on changes detected on the remote server.
+### Evolution: From 2-Way to 3-Way Sync
 
-### Steps Involved
-1. **Fetching Remote Bookmarks**: The extension first retrieves the bookmarks from the remote WebDAV server.
+#### The Problem with 2-Way Sync
 
-2. **Calculating Changes**:
-   - The extension calculates the differences between the remote bookmarks and the current local bookmarks.
-   - Changes are categorized into insertions, deletions, and updates (including changes in URL, title, index, and path).
+The original implementation used a simple 2-way sync that compared **local bookmarks** with **remote bookmarks**. This worked fine for a single machine but caused problems with multiple machines:
 
-3. **Modifying Local Bookmarks**:
-   - **Deletions**: Bookmarks that exist locally but not remotely are deleted.
-   - **Insertions**: Bookmarks that exist remotely but not locally are added to the local bookmarks.
-   - **Updates**: Any differences in URL, title, index, or path between the two sets of bookmarks are applied to the local bookmarks.
+```
+2-WAY SYNC:
+  Local State  <-->  Remote State
+       ↓                  ↓
+    Compare and apply changes
+```
 
-4. **Rescanning Local Bookmarks**: After modifications, the extension re-fetches the local bookmarks and recalculates any changes to ensure consistency.
+**Issues with 2-way sync:**
+- **No change detection**: Cannot tell if a bookmark was added locally or deleted remotely
+- **False conflicts**: Moving a bookmark on Machine A, then syncing Machine B would show a conflict (old position vs new position) even though there's no real conflict
+- **Cascading sync loops**: Changes applied during sync would trigger new change events, causing infinite sync loops
 
-5. **Applying Updates**: Finally, the extension applies any remaining updates to local bookmarks.
+#### The 3-Way Sync Solution
 
-6. **Final Synchronization**: If local changes were made (e.g., through a merge process), the extension may set the local bookmarks as the master and merge them with the remote bookmarks.
+The current implementation uses a 3-way merge algorithm with three states:
 
-## Remote Update Process Details
+```
+3-WAY SYNC:
+  oldRemoteState ──┬── currentLocalState
+                   │
+                   └── currentRemoteState
+                            ↓
+                   Calculate merged newState
+                            ↓
+         ┌──────────────────┴──────────────────┐
+         ↓                                     ↓
+  localChanges = diff(local, newState)   remoteChanges = diff(remote, newState)
+```
 
-The remote update process involves uploading your current local bookmarks to the remote WebDAV server, effectively making your local bookmarks the master copy.
+**The three states:**
+1. **oldRemoteState**: Snapshot of remote at last successful sync (baseline)
+2. **currentLocalState**: Current local bookmarks (what the user has now)
+3. **currentRemoteState**: Fresh remote state fetched at sync time
 
-### Steps Involved
-1. **Fetching Local Bookmarks**: The extension retrieves all local bookmarks.
+By comparing both local and remote against the **same baseline** (oldRemoteState), we can accurately determine:
+- What changed locally since last sync
+- What changed remotely since last sync
+- Whether changes conflict or can be merged
 
-2. **Updating Remote Bookmarks**:
-   - The extension uploads the local bookmarks to the WebDAV server.
-   - This action overwrites the existing bookmarks file on the server with the new set from the local browser.
+### Bookmark Matching Strategy
 
-3. **Confirmation**:
-   - Similar to the local update process, the extension may prompt the user for confirmation before making changes to the remote bookmarks.
+The algorithm uses two matching strategies:
 
-### Confirmation and UI Interaction
-Before applying changes, the extension may prompt the user through a confirmation page, allowing them to review the changes.
+#### 4-of-4 Exact Matching (Internal Logic)
+Two bookmarks are considered "the same" only if **all 4 attributes match**:
+- `title`
+- `url`
+- `path` (folder hierarchy)
+- `index` (position within folder)
+
+This is used for internal state tracking. A "move" operation is detected as a delete at the old location + insert at the new location.
+
+#### 3-of-4 Matching (Conflict Detection)
+Two bookmarks are considered "the same bookmark" if **3 out of 4 attributes match**. This is used to detect when the same bookmark was modified differently on each side.
+
+Example: If Machine A changes a bookmark's title and Machine B changes its URL, 3-of-4 matching identifies them as the same bookmark and merges both changes.
+
+### Tombstones
+
+When a bookmark or folder is deleted, a **tombstone** record is created instead of immediately removing it:
+
+```javascript
+{
+  title: "Deleted Bookmark",
+  url: "https://example.com",
+  path: ["Toolbar", "Work"],
+  deleted: true,
+  deletedAt: 1706745600000
+}
+```
+
+Tombstones serve several purposes:
+- Propagate deletions to other machines during sync
+- Distinguish "deleted" from "never existed"
+- Enable conflict detection (deleted vs modified)
+
+Tombstones are automatically cleaned up when:
+- The bookmark is recreated (revived)
+- A folder tombstone exists but the folder has content (folder survives)
+
+### Conflict Types
+
+#### Edit Conflict
+Both sides modified the same attribute of the same bookmark differently.
+
+```
+Baseline:    { title: "News", url: "https://news.com" }
+Local:       { title: "Daily News", url: "https://news.com" }
+Remote:      { title: "Tech News", url: "https://news.com" }
+                     ↓
+             CONFLICT: title changed differently
+```
+
+**Resolution**: User chooses "Local Master" or "Remote Master"
+
+#### Delete vs Edit Conflict
+One side deleted the bookmark while the other modified it.
+
+```
+Baseline:    { title: "News", url: "https://news.com" }
+Local:       (deleted)
+Remote:      { title: "News", url: "https://news.com/updated" }
+                     ↓
+             CONFLICT: deleted vs modified
+```
+
+**Resolution**: User chooses to keep the deletion or restore the modified version
+
+### Corner Cases and Edge Scenarios
+
+#### Index-Only Changes Are Not Conflicts
+
+When a bookmark's position changes as a **side effect** of another operation (adding/removing a sibling), this is not considered an intentional edit:
+
+```
+Machine A: Deletes bookmark X at index 2
+Machine B: Adds bookmark Y at index 1 (shifts X to index 3)
+                     ↓
+           NO CONFLICT - deletion proceeds, Y stays at index 1
+```
+
+Rationale: The user on Machine B didn't intentionally "edit" X's index - it shifted automatically.
+
+#### Folder Deletion with New Content
+
+When a folder is deleted on one machine but new content is added to it on another:
+
+```
+Machine A: Has folder F with bookmarks a, b
+Machine B: Has folder F with bookmarks a, b
+           B deletes folder F (creates tombstones for F, a, b)
+           A adds bookmark c to folder F
+           A syncs first → remote has F with a, b, c
+           B syncs → sees F was "deleted" locally but remote has c
+                     ↓
+           NOT A CONFLICT - folder F survives with only c
+           (a and b are deleted as B intended, c is new so it stays)
+```
+
+**Key insight**: New content (c) was added AFTER B's knowledge, so B's deletion intent only applies to content B knew about (a, b).
+
+#### Folder Deletion with Modified Content
+
+When a folder is deleted on one machine but existing content is modified on another:
+
+```
+Machine A: Has folder F with bookmark X
+Machine B: Has folder F with bookmark X
+           B deletes folder F
+           A modifies X's title
+           Both sync
+                     ↓
+           CONFLICT - folder deleted vs content modified
+```
+
+**Resolution**: User chooses whether to restore folder with modified content or proceed with deletion.
+
+#### Move Into Deleted Folder
+
+When a bookmark is moved into a folder that was deleted on another machine:
+
+```
+Machine A: Has root bookmark c, empty folder F
+Machine B: Has root bookmark c, empty folder F
+           B deletes empty folder F
+           A moves c into folder F
+           Both sync
+                     ↓
+           NOT A CONFLICT - F survives with c inside
+           (F was empty when deleted, now has content)
+```
+
+#### Nested Folder Deletion with Deep Content
+
+```
+Machine A: Has F1/F2/X
+Machine B: Has F1/F2/X
+           B deletes F1 (and everything inside)
+           A adds Y to F2
+           Both sync
+                     ↓
+           NOT A CONFLICT - F1 and F2 survive with only Y
+           (X is deleted, Y is new content)
+```
+
+#### Concurrent Identical Changes
+
+When both machines make the same change, no conflict or duplicate occurs:
+
+```
+Machine A: Renames X to Y
+Machine B: Renames X to Y
+           Both sync
+                     ↓
+           NO CONFLICT - both agree, result is Y
+```
+
+#### Merge of Non-Conflicting Edits
+
+When both machines edit different attributes of the same bookmark:
+
+```
+Baseline:    { title: "Site", url: "https://old.com", path: ["Root"] }
+Local:       { title: "New Site", url: "https://old.com", path: ["Root"] }
+Remote:      { title: "Site", url: "https://new.com", path: ["Root"] }
+                     ↓
+           NO CONFLICT - merge both changes
+Result:      { title: "New Site", url: "https://new.com", path: ["Root"] }
+```
+
+### Multi-Machine Sync Scenarios
+
+The 3-way algorithm handles 3+ machines correctly:
+
+```
+Machine A, B, C all start with same bookmarks
+
+1. A adds bookmark X, syncs → remote has X
+2. B deletes folder F, syncs → remote has X + F tombstone
+3. C syncs:
+   - C's oldRemoteState: no X, has F
+   - C's local: no X, has F
+   - Remote: has X, F tombstone
+   
+   Result: C gets X, deletes F locally
+   
+4. A syncs again:
+   - Sees F tombstone from B
+   - A still has F locally
+   - Result: A deletes F (if empty) or shows conflict (if A added content)
+```
+
+### Preventing Sync Loops
+
+A `syncInProgress` flag prevents recording changes that are triggered by sync operations:
+
+```javascript
+async function applySyncChangesLocally() {
+  syncInProgress = true;
+  try {
+    // Apply insertions, deletions, updates
+    // Browser fires bookmark events, but they're ignored
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+function recordChange(type, bookmarkId, info) {
+  if (syncInProgress) return; // Skip sync-triggered changes
+  // Record actual user changes...
+}
+```
+
+This prevents:
+- Sync-applied changes being recorded as new local changes
+- Cascading sync operations
+- Duplicate conflict detection
 
 ## Synchronization Triggers
 

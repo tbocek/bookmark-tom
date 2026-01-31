@@ -1,21 +1,24 @@
-// Check if two bookmarks match by 3-of-4 attributes, or by title+url (for moves)
+// Check if two bookmarks match for display grouping purposes
+// This is used to pair insertions/deletions as "updates" in the UI
 function matchForDisplay(a, b) {
   if (!a || !b) return false;
 
-  // Title + URL match = same bookmark (handles moves)
-  if (a.title === b.title && (a.url || "") === (b.url || "")) {
+  const pathA = (a.path || []).join("/");
+  const pathB = (b.path || []).join("/");
+
+  // For display: match by title + path (for folders) or title + url (for bookmarks)
+  // This way, index changes show as "position" updates, not mismatched title changes
+  if (a.title === b.title && pathA === pathB) {
+    // Same title and path - this is an index or URL change
     return true;
   }
 
-  // Otherwise use 3-of-4
-  let matches = 0;
-  if (a.title === b.title) matches++;
-  if ((a.url || "") === (b.url || "")) matches++;
-  const pathA = (a.path || []).join("/");
-  const pathB = (b.path || []).join("/");
-  if (pathA === pathB) matches++;
-  if (a.index === b.index) matches++;
-  return matches >= 3;
+  if (a.title === b.title && (a.url || "") === (b.url || "")) {
+    // Same title and URL - this is a path or index change (move)
+    return true;
+  }
+
+  return false;
 }
 
 // Find which attribute differs between two bookmarks
@@ -415,7 +418,50 @@ document.addEventListener("DOMContentLoaded", async function () {
   const updatesLocal = localChanges?.updates || [];
   const updatesRemote = remoteChanges?.updates || [];
 
+  // Group position-only updates by folder path
+  function groupPositionUpdates(updates) {
+    const positionUpdates = updates.filter(
+      (u) => u.changedAttribute === "index",
+    );
+    const otherUpdates = updates.filter((u) => u.changedAttribute !== "index");
+
+    // Group position updates by path
+    const byPath = {};
+    for (const update of positionUpdates) {
+      const pathKey = (update.newBookmark.path || []).join(" > ") || "(root)";
+      if (!byPath[pathKey]) {
+        byPath[pathKey] = [];
+      }
+      byPath[pathKey].push(update);
+    }
+
+    // Convert grouped updates to summary items
+    const groupedItems = Object.entries(byPath).map(([pathKey, items]) => ({
+      type: "position_group",
+      path: pathKey,
+      count: items.length,
+    }));
+
+    return { otherUpdates, groupedItems };
+  }
+
   function createUpdateItem(update) {
+    // Handle grouped position updates
+    if (update.type === "position_group") {
+      const li = document.createElement("li");
+      const pathSpan = document.createElement("span");
+      pathSpan.classList.add("path");
+      pathSpan.textContent = update.path;
+      li.appendChild(pathSpan);
+
+      const changeSpan = document.createElement("span");
+      changeSpan.classList.add("change-info");
+      changeSpan.textContent = ` (${update.count} position changes)`;
+      li.appendChild(changeSpan);
+
+      return li;
+    }
+
     const changeSpan = document.createElement("span");
     changeSpan.classList.add("change-info");
 
@@ -475,18 +521,36 @@ document.addEventListener("DOMContentLoaded", async function () {
     deletionsRemoteDiv.remove();
   }
 
-  // Updates
-  if (updatesLocal.length > 0) {
+  // Updates - group position changes by folder
+  const { otherUpdates: otherUpdatesLocal, groupedItems: groupedLocal } =
+    groupPositionUpdates(updatesLocal);
+  const { otherUpdates: otherUpdatesRemote, groupedItems: groupedRemote } =
+    groupPositionUpdates(updatesRemote);
+
+  const allUpdatesLocal = [...otherUpdatesLocal, ...groupedLocal];
+  const allUpdatesRemote = [...otherUpdatesRemote, ...groupedRemote];
+
+  if (allUpdatesLocal.length > 0) {
     updatesLocalDiv.appendChild(
-      createSection("Update:", updatesLocal, createUpdateItem, cloud2machine),
+      createSection(
+        "Update:",
+        allUpdatesLocal,
+        createUpdateItem,
+        cloud2machine,
+      ),
     );
   } else {
     updatesLocalDiv.remove();
   }
 
-  if (updatesRemote.length > 0) {
+  if (allUpdatesRemote.length > 0) {
     updatesRemoteDiv.appendChild(
-      createSection("Update:", updatesRemote, createUpdateItem, machine2cloud),
+      createSection(
+        "Update:",
+        allUpdatesRemote,
+        createUpdateItem,
+        machine2cloud,
+      ),
     );
   } else {
     updatesRemoteDiv.remove();
