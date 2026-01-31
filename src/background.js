@@ -908,8 +908,9 @@ function calcTombstoneChanges(
 
   // Phase 0: Detect folder conflicts
   const folderConflicts = new Set(); // Track folder paths with conflicts
+  const recreatedFolders = new Set(); // Track folders that were recreated locally (skip deletion)
 
-  // Phase 0a: Remote deleted folder, local has content in it
+  // Phase 0a: Remote deleted folder, local has folder or content in it
   for (const tombstone of remoteTombstones) {
     if (tombstone.url) continue; // Only check folder tombstones
 
@@ -921,6 +922,15 @@ function calcTombstoneChanges(
     );
     if (isInsideConflictedFolder) continue;
 
+    // Check if local has the folder itself
+    const localHasFolder = localBookmarks.some(
+      (bm) =>
+        !bm.url &&
+        bm.title === tombstone.title &&
+        arraysEqual(bm.path, tombstone.path),
+    );
+
+    // Check if local has content inside the folder
     const localContentInFolder = localBookmarks.filter((bm) => {
       if (bm.path.length >= folderPath.length) {
         return folderPath.every((segment, i) => bm.path[i] === segment);
@@ -928,7 +938,32 @@ function calcTombstoneChanges(
       return false;
     });
 
-    if (localContentInFolder.length > 0) {
+    if (localHasFolder || localContentInFolder.length > 0) {
+      // Check if folder was recreated locally using lastSyncedState
+      // If folder didn't exist at last sync but exists now locally, it was recreated
+      // (regardless of whether local tombstone exists - tombstone just means we deleted it before)
+      if (lastSyncedState) {
+        const folderExistedInLastSync = lastSyncedState.some(
+          (bm) =>
+            !bm.url &&
+            bm.title === tombstone.title &&
+            arraysEqual(bm.path, tombstone.path),
+        );
+        const contentExistedInLastSync = lastSyncedState.some((bm) => {
+          if (bm.path && bm.path.length >= folderPath.length) {
+            return folderPath.every((segment, i) => bm.path[i] === segment);
+          }
+          return false;
+        });
+
+        if (!folderExistedInLastSync && !contentExistedInLastSync) {
+          // Folder didn't exist at last sync - it was recreated locally
+          // Skip conflict, let content flow through as normal insertions
+          recreatedFolders.add(folderPath.join("/"));
+          continue;
+        }
+      }
+
       conflicts.push({
         type: "folder_deleted_remote",
         folder: tombstone,
@@ -1069,6 +1104,11 @@ function calcTombstoneChanges(
           matchedLocalKeys.add(key);
           continue; // Skip - handled as folder conflict
         }
+        // Check if this folder was recreated locally (skip deletion, push instead)
+        if (recreatedFolders.has(folderPath)) {
+          // Don't mark as matched - let it flow through as insertion
+          continue;
+        }
       }
       // Check if this item is inside a conflicted folder (skip deletion if so)
       const isInsideConflictedFolder = Array.from(folderConflicts).some(
@@ -1077,6 +1117,14 @@ function calcTombstoneChanges(
       if (isInsideConflictedFolder) {
         matchedLocalKeys.add(key);
         continue; // Skip - parent folder conflict will handle this
+      }
+      // Check if this item is inside a recreated folder (skip deletion, push instead)
+      const isInsideRecreatedFolder = Array.from(recreatedFolders).some(
+        (recreatedPath) => local.path.join("/").startsWith(recreatedPath),
+      );
+      if (isInsideRecreatedFolder) {
+        // Don't mark as matched - let it flow through as insertion
+        continue;
       }
       // Remote deleted this bookmark - delete locally
       localChanges.deletions.push(local);
@@ -1120,6 +1168,20 @@ function calcTombstoneChanges(
       if (isInsideConflictedFolder) {
         matchedLocalKeys.add(key);
         continue;
+      }
+      // Skip if this is a recreated folder or inside one
+      const isFolder = !local.url;
+      if (isFolder) {
+        const folderPath = [...local.path, local.title].join("/");
+        if (recreatedFolders.has(folderPath)) {
+          continue; // Will be pushed as insertion
+        }
+      }
+      const isInsideRecreatedFolder = Array.from(recreatedFolders).some(
+        (recreatedPath) => local.path.join("/").startsWith(recreatedPath),
+      );
+      if (isInsideRecreatedFolder) {
+        continue; // Will be pushed as insertion
       }
       localChanges.deletions.push(local);
       matchedLocalKeys.add(key);

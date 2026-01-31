@@ -2221,6 +2221,203 @@ describe("3-Way Diff with lastSyncedState", () => {
   });
 });
 
+describe("Folder Add-Remove-Add Cycle", () => {
+  it("should handle add folder, remove folder, add same folder again", () => {
+    // Scenario:
+    // 1. Machine A adds folder "Test" with items
+    // 2. Machine A syncs (folder + items pushed to remote)
+    // 3. Machine A removes folder "Test"
+    // 4. Machine A syncs (tombstones pushed to remote)
+    // 5. Machine A adds folder "Test" again with new items
+    // 6. Machine A syncs - should push new folder, NOT conflict with old tombstone
+
+    // State after step 5: local has new folder, remote has tombstone from step 4
+    const localBookmarks = [
+      { title: "Test", path: ["Toolbar"], index: 0 },
+      {
+        title: "newItem",
+        url: "http://new.com",
+        path: ["Toolbar", "Test"],
+        index: 0,
+      },
+    ];
+
+    // Remote still has the tombstone from deletion
+    const remoteData = [
+      {
+        title: "Test",
+        path: ["Toolbar"],
+        deleted: true,
+        deletedAt: Date.now() - 10000,
+      },
+      {
+        title: "oldItem",
+        url: "http://old.com",
+        path: ["Toolbar", "Test"],
+        deleted: true,
+        deletedAt: Date.now() - 10000,
+      },
+    ];
+
+    // Local tombstones were cleared when folder was recreated
+    const localTombstones = [];
+
+    // lastSyncedState was after the deletion (empty, just tombstones)
+    const lastSyncedState = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+      lastSyncedState,
+    );
+
+    // Should NOT conflict - local created new folder
+    expect(result.conflicts).to.be.empty;
+
+    // Should push new folder and item to remote
+    expect(result.remoteChanges.insertions).to.have.lengthOf(2);
+    const insertedTitles = result.remoteChanges.insertions.map((i) => i.title);
+    expect(insertedTitles).to.include("Test");
+    expect(insertedTitles).to.include("newItem");
+
+    // Should NOT pull tombstones to local (folder was recreated)
+    expect(result.localChanges.deletions).to.be.empty;
+  });
+
+  it("should handle recreated folder with same content as before deletion", () => {
+    // Edge case: folder deleted and recreated with same items
+    const localBookmarks = [
+      { title: "Test", path: ["Toolbar"], index: 0 },
+      {
+        title: "item1",
+        url: "http://item1.com",
+        path: ["Toolbar", "Test"],
+        index: 0,
+      },
+    ];
+
+    // Remote has tombstones
+    const remoteData = [
+      {
+        title: "Test",
+        path: ["Toolbar"],
+        deleted: true,
+        deletedAt: Date.now() - 10000,
+      },
+      {
+        title: "item1",
+        url: "http://item1.com",
+        path: ["Toolbar", "Test"],
+        deleted: true,
+        deletedAt: Date.now() - 10000,
+      },
+    ];
+
+    const localTombstones = [];
+    const lastSyncedState = [];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+      lastSyncedState,
+    );
+
+    // Should NOT conflict
+    expect(result.conflicts).to.be.empty;
+
+    // Should push recreated folder and item
+    expect(result.remoteChanges.insertions).to.have.lengthOf(2);
+
+    // Should NOT delete locally
+    expect(result.localChanges.deletions).to.be.empty;
+  });
+
+  it("should sync cleanly after folder is recreated on second sync", () => {
+    // After the recreated folder is pushed, next sync should be clean
+    const localBookmarks = [
+      { title: "Test", path: ["Toolbar"], index: 0 },
+      {
+        title: "newItem",
+        url: "http://new.com",
+        path: ["Toolbar", "Test"],
+        index: 0,
+      },
+    ];
+
+    // Remote now has the folder (pushed in previous sync)
+    const remoteData = [
+      { title: "Test", path: ["Toolbar"], index: 0 },
+      {
+        title: "newItem",
+        url: "http://new.com",
+        path: ["Toolbar", "Test"],
+        index: 0,
+      },
+    ];
+
+    const localTombstones = [];
+    const lastSyncedState = [...localBookmarks];
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+      lastSyncedState,
+    );
+
+    // Should be completely clean
+    expect(result.conflicts).to.be.empty;
+    expect(result.localChanges.insertions).to.be.empty;
+    expect(result.localChanges.deletions).to.be.empty;
+    expect(result.remoteChanges.insertions).to.be.empty;
+    expect(result.remoteChanges.deletions).to.be.empty;
+  });
+
+  it("should handle empty folder add-remove-add cycle", () => {
+    // Scenario: Create empty folder, delete it, create same empty folder again
+    // The recreated empty folder should be pushed, not deleted
+
+    const localBookmarks = [
+      { title: "EmptyFolder", path: ["Toolbar"], index: 0 }, // Empty folder
+    ];
+
+    const remoteData = [
+      {
+        title: "EmptyFolder",
+        path: ["Toolbar"],
+        deleted: true,
+        deletedAt: Date.now() - 10000,
+      },
+    ];
+
+    const localTombstones = [];
+    const lastSyncedState = []; // After deletion sync, state was empty
+
+    const result = calcTombstoneChanges(
+      localBookmarks,
+      remoteData,
+      localTombstones,
+      [],
+      lastSyncedState,
+    );
+
+    // Should NOT conflict - folder was recreated
+    expect(result.conflicts).to.be.empty;
+
+    // Should push recreated folder to remote
+    expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+    expect(result.remoteChanges.insertions[0].title).to.equal("EmptyFolder");
+
+    // Should NOT delete locally
+    expect(result.localChanges.deletions).to.be.empty;
+  });
+});
+
 describe("Move Bookmark to Subfolder", () => {
   it("should detect move to subfolder as delete old + insert new", () => {
     // User moves "b" from Bookmarks Toolbar to Bookmarks Toolbar > Test 123
