@@ -203,6 +203,38 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
   }
 
+  // Helper to create a conflict detail row with label and value
+  function createConflictDetail(label, value, suffix = "") {
+    const div = document.createElement("div");
+    div.classList.add("conflict-detail");
+
+    const labelSpan = document.createElement("span");
+    labelSpan.classList.add("conflict-label");
+    labelSpan.textContent = label + ":";
+    div.appendChild(labelSpan);
+
+    div.appendChild(document.createTextNode(" "));
+
+    const valueSpan = document.createElement("span");
+    valueSpan.classList.add("conflict-value");
+    valueSpan.textContent = value;
+    div.appendChild(valueSpan);
+
+    if (suffix) {
+      div.appendChild(document.createTextNode(suffix));
+    }
+
+    return div;
+  }
+
+  // Helper to create a content item row (indented list item)
+  function createContentItem(title) {
+    const itemDiv = document.createElement("div");
+    itemDiv.classList.add("conflict-detail", "conflict-content-item");
+    itemDiv.textContent = "\u00A0\u00A0- " + title;
+    return itemDiv;
+  }
+
   function createConflictListItem(conflict) {
     // Handle folder_deleted_remote conflict type (remote deleted folder, local has content)
     if (conflict.type === "folder_deleted_remote") {
@@ -212,27 +244,24 @@ document.addEventListener("DOMContentLoaded", async function () {
       const detailsDiv = document.createElement("div");
       detailsDiv.classList.add("conflict-details");
 
-      const folderDiv = document.createElement("div");
-      folderDiv.classList.add("conflict-detail");
-      folderDiv.innerHTML = `<span class="conflict-label">Folder:</span> <span class="conflict-value">${folder.title}</span> at ${folderPath.join(" > ") || "(root)"}`;
-      detailsDiv.appendChild(folderDiv);
-
-      const msgDiv = document.createElement("div");
-      msgDiv.classList.add("conflict-detail");
-      msgDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">(deleted)</span>`;
-      detailsDiv.appendChild(msgDiv);
-
-      const contentDiv = document.createElement("div");
-      contentDiv.classList.add("conflict-detail");
-      contentDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">${conflict.localContent.length} item(s) inside</span>`;
-      detailsDiv.appendChild(contentDiv);
+      detailsDiv.appendChild(
+        createConflictDetail(
+          "Folder",
+          folder.title,
+          " at " + (folderPath.join(" > ") || "(root)"),
+        ),
+      );
+      detailsDiv.appendChild(createConflictDetail("Remote", "(deleted)"));
+      detailsDiv.appendChild(
+        createConflictDetail(
+          "Local",
+          conflict.localContent.length + " item(s) inside",
+        ),
+      );
 
       if (conflict.localContent.length <= 5) {
         for (const bm of conflict.localContent) {
-          const itemDiv = document.createElement("div");
-          itemDiv.classList.add("conflict-detail", "conflict-content-item");
-          itemDiv.innerHTML = `&nbsp;&nbsp;- ${bm.title}`;
-          detailsDiv.appendChild(itemDiv);
+          detailsDiv.appendChild(createContentItem(bm.title));
         }
       }
 
@@ -259,27 +288,26 @@ document.addEventListener("DOMContentLoaded", async function () {
       const detailsDiv = document.createElement("div");
       detailsDiv.classList.add("conflict-details");
 
-      const folderDiv = document.createElement("div");
-      folderDiv.classList.add("conflict-detail");
-      folderDiv.innerHTML = `<span class="conflict-label">Folder:</span> <span class="conflict-value">${folder.title}</span> at ${folderPath.join(" > ") || "(root)"}`;
-      detailsDiv.appendChild(folderDiv);
-
-      const msgDiv = document.createElement("div");
-      msgDiv.classList.add("conflict-detail");
-      msgDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">(you deleted this)</span>`;
-      detailsDiv.appendChild(msgDiv);
-
-      const contentDiv = document.createElement("div");
-      contentDiv.classList.add("conflict-detail");
-      contentDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">${conflict.remoteContent.length} item(s) inside</span>`;
-      detailsDiv.appendChild(contentDiv);
+      detailsDiv.appendChild(
+        createConflictDetail(
+          "Folder",
+          folder.title,
+          " at " + (folderPath.join(" > ") || "(root)"),
+        ),
+      );
+      detailsDiv.appendChild(
+        createConflictDetail("Local", "(you deleted this)"),
+      );
+      detailsDiv.appendChild(
+        createConflictDetail(
+          "Remote",
+          conflict.remoteContent.length + " item(s) inside",
+        ),
+      );
 
       if (conflict.remoteContent.length <= 5) {
         for (const bm of conflict.remoteContent) {
-          const itemDiv = document.createElement("div");
-          itemDiv.classList.add("conflict-detail", "conflict-content-item");
-          itemDiv.innerHTML = `&nbsp;&nbsp;- ${bm.title}`;
-          detailsDiv.appendChild(itemDiv);
+          detailsDiv.appendChild(createContentItem(bm.title));
         }
       }
 
@@ -309,26 +337,22 @@ document.addEventListener("DOMContentLoaded", async function () {
 
       if (conflict.localAction === "deleted") {
         // Local deleted, remote modified
-        const localDiv = document.createElement("div");
-        localDiv.classList.add("conflict-detail");
-        localDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">(deleted)</span>`;
-        detailsDiv.appendChild(localDiv);
-
-        const remoteDiv = document.createElement("div");
-        remoteDiv.classList.add("conflict-detail");
-        remoteDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">"${remoteVersion?.title || bookmark.title}"</span>`;
-        detailsDiv.appendChild(remoteDiv);
+        detailsDiv.appendChild(createConflictDetail("Local", "(deleted)"));
+        detailsDiv.appendChild(
+          createConflictDetail(
+            "Remote",
+            '"' + (remoteVersion?.title || bookmark.title) + '"',
+          ),
+        );
       } else {
         // Local modified, remote deleted
-        const localDiv = document.createElement("div");
-        localDiv.classList.add("conflict-detail");
-        localDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">"${localVersion?.title || bookmark.title}"</span>`;
-        detailsDiv.appendChild(localDiv);
-
-        const remoteDiv = document.createElement("div");
-        remoteDiv.classList.add("conflict-detail");
-        remoteDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">(deleted)</span>`;
-        detailsDiv.appendChild(remoteDiv);
+        detailsDiv.appendChild(
+          createConflictDetail(
+            "Local",
+            '"' + (localVersion?.title || bookmark.title) + '"',
+          ),
+        );
+        detailsDiv.appendChild(createConflictDetail("Remote", "(deleted)"));
       }
 
       const attrInfo = document.createElement("div");
