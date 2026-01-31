@@ -303,7 +303,46 @@ async function handleSync(config) {
   });
 
   // Create new remote data
-  const newRemoteData = [...finalBookmarks, ...filteredTombstones];
+  let newRemoteData = [...finalBookmarks, ...filteredTombstones];
+
+  // Ensure parent folders exist for items being pushed to remote
+  if (remoteChanges?.insertions?.length > 0) {
+    for (const item of remoteChanges.insertions) {
+      // Check each level of the path
+      for (let i = 1; i <= item.path.length; i++) {
+        const folderPath = item.path.slice(0, i);
+        const folderTitle = folderPath[folderPath.length - 1];
+        const parentPath = folderPath.slice(0, -1);
+
+        // Check if folder exists in newRemoteData
+        const folderExists = newRemoteData.some(
+          (bm) =>
+            !bm.url &&
+            !bm.deleted &&
+            bm.title === folderTitle &&
+            arraysEqual(bm.path, parentPath),
+        );
+
+        if (!folderExists) {
+          // Add folder to newRemoteData
+          newRemoteData.push({
+            title: folderTitle,
+            path: parentPath,
+            index: 0,
+          });
+          // Remove tombstone for this folder if present
+          newRemoteData = newRemoteData.filter(
+            (bm) =>
+              !(
+                bm.deleted &&
+                bm.title === folderTitle &&
+                arraysEqual(bm.path, parentPath)
+              ),
+          );
+        }
+      }
+    }
+  }
 
   // Update remote
   await updateWebDAV(

@@ -718,10 +718,11 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
 
-    it("Case 21: A deletes F with Y, B adds Z to F -> folder conflict", () => {
+    it("Case 21: A deletes F with Y, B adds Z to F -> NOT conflict, Z pushed, F recreated, Y deleted locally", () => {
       // Initial: F with Y
       // A deletes F, syncs -> remote has tombstones F, Y
-      // B adds Z to F, syncs -> folder conflict
+      // B adds Z to F, syncs -> NOT a conflict
+      // Result: Z pushed to remote, F recreated, Y deleted locally
 
       const oldRemoteState = [
         { title: "F", path: ["Toolbar"], index: 0 },
@@ -756,15 +757,31 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Folder conflict: remote deleted F, local added Z
-      expect(folderConflicts).to.have.lengthOf(1);
-      expect(folderConflicts[0].type).to.equal("folder_deleted_remote");
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No folder conflict - new content Z means folder survives
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // Z pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "Z")).to.be
+        .true;
+      // F and Y deleted locally (remote deleted them, background.js recreates F on remote when pushing Z)
+      expect(result.localChanges.deletions.some((d) => d.title === "F")).to.be
+        .true;
+      expect(result.localChanges.deletions.some((d) => d.title === "Y")).to.be
+        .true;
     });
 
-    it("Case 22: A deletes empty F, B adds Y to F -> folder conflict", () => {
+    it("Case 22: A deletes empty F, B adds Y to F -> NOT conflict, Y pushed, F recreated", () => {
       // Initial: F (empty)
       // A deletes F, syncs -> remote has tombstone F
-      // B adds Y to F, syncs -> folder conflict
+      // B adds Y to F, syncs -> NOT a conflict
+      // Result: Y pushed to remote, F deleted locally (background.js recreates F on remote when pushing Y)
 
       const oldRemoteState = [{ title: "F", path: ["Toolbar"], index: 0 }];
       const currentLocalState = [
@@ -787,9 +804,22 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Folder conflict: remote deleted F, local added Y
-      expect(folderConflicts).to.have.lengthOf(1);
-      expect(folderConflicts[0].type).to.equal("folder_deleted_remote");
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No folder conflict - new content Y means folder survives
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // Y pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "Y")).to.be
+        .true;
+      // F deleted locally (background.js recreates F on remote when pushing Y)
+      expect(result.localChanges.deletions.some((d) => d.title === "F")).to.be
+        .true;
     });
 
     it("Case 23: A deletes empty F, B syncs -> B deletes F", () => {
@@ -849,10 +879,11 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
 
-    it("Case 25: A moves X into F, B deletes empty F -> B gets F and X", () => {
+    it("Case 25: A moves X into F, B deletes empty F -> NOT conflict, B gets F and X", () => {
       // Initial: X, F (empty)
       // A moves X into F, syncs -> remote has X in F
-      // B deletes empty F, syncs -> B creates F, gets X
+      // B deletes empty F, syncs -> NOT a conflict
+      // Result: B gets X inside F (background.js recreates F locally when inserting X)
 
       const oldRemoteState = [
         { title: "F", path: ["Toolbar"], index: 0 },
@@ -879,9 +910,28 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Folder conflict: local deleted F, remote has X in F (new content)
-      expect(folderConflicts).to.have.lengthOf(1);
-      expect(folderConflicts[0].type).to.equal("folder_deleted_local");
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No folder conflict - remote has X in F, B gets it
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // X inside F inserted locally (A moved X into F)
+      expect(
+        result.localChanges.insertions.some(
+          (i) => i.title === "X" && i.path.join("/") === "Toolbar/F",
+        ),
+      ).to.be.true;
+      // Old X at root deleted locally
+      expect(
+        result.localChanges.deletions.some(
+          (d) => d.title === "X" && d.path.join("/") === "Toolbar",
+        ),
+      ).to.be.true;
     });
 
     it("Case 26: B deletes F with Y -> remote gets tombstones", () => {
@@ -993,10 +1043,11 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
 
-    it("Case 28: A deletes F1 containing F2/X, B adds Y to F2 -> folder conflict", () => {
+    it("Case 28: A deletes F1 containing F2/X, B adds Y to F2 -> NOT conflict, Y pushed, folders recreated", () => {
       // Initial: F1/F2/X
       // A deletes F1, syncs -> remote has tombstones F1, F2, X
-      // B adds Y to F2, syncs -> folder conflict
+      // B adds Y to F2, syncs -> NOT a conflict
+      // Result: Y pushed to remote, F1/F2/X deleted locally (background.js recreates F1, F2 on remote when pushing Y)
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -1055,9 +1106,26 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Folder conflict: remote deleted F1, local added Y
-      expect(folderConflicts.length).to.be.greaterThan(0);
-      expect(folderConflicts[0].type).to.equal("folder_deleted_remote");
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No folder conflict - new content Y means folders survive
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // Y pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "Y")).to.be
+        .true;
+      // F1, F2, X deleted locally (remote deleted them)
+      expect(result.localChanges.deletions.some((d) => d.title === "F1")).to.be
+        .true;
+      expect(result.localChanges.deletions.some((d) => d.title === "F2")).to.be
+        .true;
+      expect(result.localChanges.deletions.some((d) => d.title === "X")).to.be
+        .true;
     });
   });
 
@@ -1184,6 +1252,72 @@ describe("3-State Sync Algorithm", () => {
 
       // Should NOT be a conflict
       expect(folderConflicts).to.be.empty;
+    });
+  });
+
+  // ============================================
+  // FOLDER DELETE + REMOTE NEW CONTENT
+  // ============================================
+
+  describe("Folder Delete + Remote New Content", () => {
+    it("Case 35: B has X/a, A adds X/c,d, B deletes X -> remove X/a, insert X/c,d, no conflict", () => {
+      // Machine B has X/a - sync
+      // Machine A adds X/c, X/d - sync
+      // Machine B deletes X - sync
+      // Result: remove X/a locally, insert X/c and X/d locally, no conflict
+
+      const oldRemoteState = [
+        { title: "X", path: ["Toolbar"], index: 0 },
+        { title: "a", url: "http://a/", path: ["Toolbar", "X"], index: 0 },
+      ];
+      const currentLocalState = [
+        // B deleted X, so has tombstones
+        {
+          title: "X",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        {
+          title: "a",
+          url: "http://a/",
+          path: ["Toolbar", "X"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+      const currentRemoteState = [
+        // A added c and d to X
+        { title: "X", path: ["Toolbar"], index: 0 },
+        { title: "a", url: "http://a/", path: ["Toolbar", "X"], index: 0 },
+        { title: "c", url: "http://c/", path: ["Toolbar", "X"], index: 1 },
+        { title: "d", url: "http://d/", path: ["Toolbar", "X"], index: 2 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      const folderConflicts = detectFolderConflicts(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No conflict - new content c,d means folder survives
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // c and d should be inserted locally (new content from A)
+      // (background.js will recreate X folder when inserting c,d)
+      expect(result.localChanges.insertions.some((i) => i.title === "c")).to.be
+        .true;
+      expect(result.localChanges.insertions.some((i) => i.title === "d")).to.be
+        .true;
     });
   });
 
