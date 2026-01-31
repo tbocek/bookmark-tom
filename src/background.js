@@ -1,9 +1,7 @@
 //************************** CONSTANTS **************************
 const ACTIONS = {
   LOCAL_UPDATE: "Local Update",
-  LOCAL_UPDATE_MERGE: "Local Update-merge",
   REMOTE_UPDATE: "Remote Update",
-  REMOTE_UPDATE_MERGE: "Remote Update-merge",
   CONFLICT: "Conflict",
   CONFLICT_LOCAL: "Conflict-local",
   CONFLICT_REMOTE: "Conflict-remote",
@@ -561,6 +559,7 @@ async function syncAllBookmarks(
       // Remote master - pull changes to local
       const changes = convertThreeWayToChanges(threeWayResult, "pull");
       console.log("three-way changes (remote master):", changes);
+      console.log("threeWayResult:", threeWayResult);
       await displayConfirmationPage(
         changes,
         "Local Update",
@@ -1065,26 +1064,6 @@ async function handleLocalUpdate(config) {
   await closeConfirmationWindow();
 }
 
-async function handleLocalUpdateMerge(config) {
-  const { insertions, remoteBookmarks } = await browser.storage.local.get([
-    "insertions",
-    "remoteBookmarks",
-  ]);
-  await modifyLocalBookmarks([], insertions);
-
-  const localBookmarks = await getLocalBookmarksSnapshot();
-  const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
-  await applyLocalBookmarkUpdates(changes.updateIndexes);
-  await closeConfirmationWindow();
-  await syncAllBookmarks(
-    config.url,
-    config.username,
-    config.password,
-    true,
-    false,
-  );
-}
-
 async function handleRemoteUpdate(config) {
   const { updateIndexes } = await browser.storage.local.get(["updateIndexes"]);
   await applyLocalBookmarkUpdates(updateIndexes);
@@ -1105,31 +1084,6 @@ async function handleRemoteUpdate(config) {
     true,
   );
   await closeConfirmationWindow();
-}
-
-async function handleRemoteUpdateMerge(config) {
-  const { updateIndexes } = await browser.storage.local.get(["updateIndexes"]);
-  await applyLocalBookmarkUpdates(updateIndexes);
-
-  const { deletions } = await browser.storage.local.get(["deletions"]);
-  await modifyLocalBookmarks([], deletions);
-
-  const localBookmarks = await getLocalBookmarksSnapshot();
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    localBookmarks,
-    false,
-  );
-  await closeConfirmationWindow();
-  await syncAllBookmarks(
-    config.url,
-    config.username,
-    config.password,
-    true,
-    false,
-  );
 }
 
 async function handleConflictLocal(config) {
@@ -1195,9 +1149,7 @@ async function handleSyncAllBookmarks(config, sendResponse) {
 
 const messageHandlers = {
   [ACTIONS.LOCAL_UPDATE]: handleLocalUpdate,
-  [ACTIONS.LOCAL_UPDATE_MERGE]: handleLocalUpdateMerge,
   [ACTIONS.REMOTE_UPDATE]: handleRemoteUpdate,
-  [ACTIONS.REMOTE_UPDATE_MERGE]: handleRemoteUpdateMerge,
   [ACTIONS.CONFLICT_LOCAL]: handleConflictLocal,
   [ACTIONS.CONFLICT_REMOTE]: handleConflictRemote,
   [ACTIONS.CANCEL]: async () => closeConfirmationWindow(),

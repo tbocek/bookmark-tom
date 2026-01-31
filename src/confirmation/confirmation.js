@@ -18,7 +18,6 @@ document.addEventListener("DOMContentLoaded", async function () {
   const conflictButtons = document.getElementById("conflict-buttons");
 
   const spinner1 = document.getElementById("spinner1");
-  const spinner2 = document.getElementById("spinner2");
 
   const cloudToMachineSVG = "../icons/cloud2machine.svg";
   const machineToCloudSVG = "../icons/machine2cloud.svg";
@@ -211,17 +210,6 @@ document.addEventListener("DOMContentLoaded", async function () {
       showSpinner(spinner1);
       browser.runtime.sendMessage({ action: action });
     });
-
-  const mergeBtn = document.getElementById("confirm-merge");
-  if (deletions && deletions.length > 0) {
-    mergeBtn.disabled = false;
-    mergeBtn.addEventListener("click", function () {
-      showSpinner(spinner2);
-      browser.runtime.sendMessage({ action: action + "-merge" });
-    });
-  } else {
-    mergeBtn.disabled = true;
-  }
 
   document.getElementById("cancel").addEventListener("click", function () {
     browser.runtime.sendMessage({ action: "cancelChanges" });
