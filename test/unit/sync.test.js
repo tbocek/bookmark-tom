@@ -1429,6 +1429,9 @@ describe("Three-Machine Folder Conflict Scenarios", () => {
     expect(resultB.conflicts[0].folder.title).to.equal("Archive");
     expect(resultB.conflicts[0].remoteContent).to.have.lengthOf(1);
 
+    // Should NOT have separate insertions for folder or content (they're part of conflict)
+    expect(resultB.localChanges.insertions).to.be.empty;
+
     // Step 6: Machine C syncs (started with empty folder)
     const localBookmarksC = [{ title: "Archive", path: ["Toolbar"], index: 0 }];
 

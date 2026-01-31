@@ -962,6 +962,14 @@ function calcTombstoneChanges(
 
       folderConflicts.add(folderPath.join("/"));
 
+      // Mark the folder itself as matched (so it doesn't show as separate insertion)
+      const folderKey = bookmarkIdentityKey({
+        title: tombstone.title,
+        path: tombstone.path,
+        url: "",
+      });
+      matchedRemoteKeys.add(folderKey);
+
       for (const bm of remoteContentInFolder) {
         matchedRemoteKeys.add(bookmarkIdentityKey(bm));
         const localMatch = find3of4Match(bm, localBookmarks);
