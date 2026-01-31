@@ -565,10 +565,37 @@ function calcSyncChanges(
   );
 
   // Step 2: Diff currentLocalState vs newState → localChanges
-  const localChanges = diffStates(currentLocalState || [], newState);
+  let localChanges = diffStates(currentLocalState || [], newState);
 
   // Step 3: Diff currentRemoteState vs newState → remoteChanges
-  const remoteChanges = diffStates(currentRemoteState || [], newState);
+  let remoteChanges = diffStates(currentRemoteState || [], newState);
+
+  // Step 4: Filter out conflicted items from changes
+  // Conflicted items are excluded from newState, so they appear as deletions
+  // But they should be handled by conflict resolution, not shown as deletions
+  if (conflicts.length > 0) {
+    const isConflicted = (bm) => {
+      return conflicts.some((c) => {
+        // Check against localVersion, remoteVersion, or bookmark
+        if (c.localVersion && match3of4(bm, c.localVersion)) return true;
+        if (c.remoteVersion && match3of4(bm, c.remoteVersion)) return true;
+        if (c.bookmark && match3of4(bm, c.bookmark)) return true;
+        return false;
+      });
+    };
+
+    localChanges = {
+      insertions: localChanges.insertions.filter((i) => !isConflicted(i)),
+      deletions: localChanges.deletions.filter((d) => !isConflicted(d)),
+      updates: localChanges.updates.filter((u) => !isConflicted(u)),
+    };
+
+    remoteChanges = {
+      insertions: remoteChanges.insertions.filter((i) => !isConflicted(i)),
+      deletions: remoteChanges.deletions.filter((d) => !isConflicted(d)),
+      updates: remoteChanges.updates.filter((u) => !isConflicted(u)),
+    };
+  }
 
   return {
     localChanges,

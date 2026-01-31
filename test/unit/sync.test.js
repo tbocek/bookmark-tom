@@ -580,6 +580,43 @@ describe("3-State Sync Algorithm", () => {
       // Current implementation: conflict for same attribute
       expect(result.conflicts.length).to.be.lessThanOrEqual(1);
     });
+
+    it("Case 39: Both edit title differently -> conflict, remote master should update local", () => {
+      // Initial: f
+      // Machine 2: f -> f5, sync
+      // Machine 1: f -> f6, sync -> conflict
+      // User chooses "remote master" -> f6 should become f5
+      //
+      // This test verifies the conflict is detected and the 3-of-4 match exists
+      // The actual update is done by handleConflictRemote in background.js
+
+      const oldRemoteState = [
+        { title: "f", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
+      ];
+      const currentLocalState = [
+        { title: "f6", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
+      ];
+      const currentRemoteState = [
+        { title: "f5", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // Conflict detected
+      expect(result.conflicts).to.have.lengthOf(1);
+      expect(result.conflicts[0].type).to.equal("edit_conflict");
+      expect(result.conflicts[0].attribute).to.equal("title");
+      expect(result.conflicts[0].localVersion.title).to.equal("f6");
+      expect(result.conflicts[0].remoteVersion.title).to.equal("f5");
+
+      // Conflicted items should NOT appear in changes (filtered out)
+      expect(result.localChanges.deletions).to.be.empty;
+      expect(result.remoteChanges.deletions).to.be.empty;
+    });
   });
 
   // ============================================

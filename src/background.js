@@ -413,14 +413,18 @@ async function handleConflictRemote(config) {
   const remoteActive = getActive(remoteBookmarks || []);
   const remoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Calculate what to delete and insert locally
+  // Calculate what to delete, insert, and update locally
   const toDelete = [];
   const toInsert = [];
+  const toUpdate = [];
 
   for (const local of localBookmarks) {
     const remoteMatch = find3of4(local, remoteActive);
     if (!remoteMatch) {
       toDelete.push(local);
+    } else if (!bookmarksEqual(local, remoteMatch)) {
+      // 3-of-4 match but not exact - need to update to remote version
+      toUpdate.push({ local, remote: remoteMatch });
     }
   }
 
@@ -436,6 +440,38 @@ async function handleConflictRemote(config) {
     await modifyLocalBookmarks(toDelete, toInsert, [], (path) =>
       removeLocalTombstonesForPath(path, arraysEqual),
     );
+
+    // Apply updates (items that match 3-of-4 but differ)
+    for (const { local, remote } of toUpdate) {
+      const bookmarkId = await locateBookmarkId(
+        local.url,
+        local.title,
+        null,
+        local.path,
+      );
+      if (bookmarkId) {
+        // Update title if different
+        if (local.title !== remote.title || local.url !== remote.url) {
+          await browser.bookmarks.update(bookmarkId, {
+            title: remote.title,
+            url: remote.url,
+          });
+        }
+        // Move if path or index different
+        if (
+          !arraysEqual(local.path, remote.path) ||
+          local.index !== remote.index
+        ) {
+          const newParentId = await locateParentId(remote.path, true);
+          if (newParentId) {
+            await browser.bookmarks.move(bookmarkId, {
+              parentId: newParentId,
+              index: remote.index,
+            });
+          }
+        }
+      }
+    }
   } finally {
     syncInProgress = false;
   }
