@@ -1054,40 +1054,54 @@ async function handleSync(config) {
   // Get final local state and push to remote (includes local changes)
   const finalBookmarks = await getLocalBookmarksSnapshot();
 
-  // Update both remote files
+  // Update .old to previous remote state BEFORE updating .json
+  // This preserves the baseline for other machines that haven't synced yet
+  if (remoteBookmarks) {
+    await updateWebDAV(
+      config.url,
+      config.username,
+      config.password,
+      remoteBookmarks,
+      true,
+    );
+  }
+
+  // Update .json to the new merged state
   await updateWebDAV(
     config.url,
     config.username,
     config.password,
     finalBookmarks,
     false,
-  );
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    finalBookmarks,
-    true,
   );
 
   await closeConfirmationWindow();
 }
 
 async function handleConflictLocal(config) {
+  const { remoteBookmarks } = await browser.storage.local.get([
+    "remoteBookmarks",
+  ]);
   const localBookmarks = await getLocalBookmarksSnapshot();
+
+  // Update .old to previous remote state before updating .json
+  if (remoteBookmarks) {
+    await updateWebDAV(
+      config.url,
+      config.username,
+      config.password,
+      remoteBookmarks,
+      true,
+    );
+  }
+
+  // Push local as the new state
   await updateWebDAV(
     config.url,
     config.username,
     config.password,
     localBookmarks,
     false,
-  );
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    localBookmarks,
-    true,
   );
   await closeConfirmationWindow();
 }
@@ -1108,14 +1122,8 @@ async function handleConflictRemote(config) {
   );
   await applyLocalBookmarkUpdates(indexChanges.updateIndexes);
 
-  const finalBookmarks = await getLocalBookmarksSnapshot();
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    finalBookmarks,
-    true,
-  );
+  // For conflict-remote, we accept remote as-is, so .old becomes the previous remote
+  // and .json stays as remote (no change needed to .json)
   await closeConfirmationWindow();
 }
 
