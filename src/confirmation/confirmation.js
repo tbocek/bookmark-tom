@@ -7,18 +7,17 @@ document.addEventListener("DOMContentLoaded", async function () {
   ]);
   const { localChanges, remoteChanges, action, conflicts } = storageData;
 
-  const insertionsDiv = document.getElementById("insertions");
-  const deletionsDiv = document.getElementById("deletions");
-  const updatesDiv = document.getElementById("updates");
+  const insertionsLocalDiv = document.getElementById("insertions-local");
+  const insertionsRemoteDiv = document.getElementById("insertions-remote");
+  const deletionsLocalDiv = document.getElementById("deletions-local");
+  const deletionsRemoteDiv = document.getElementById("deletions-remote");
+  const updatesLocalDiv = document.getElementById("updates-local");
+  const updatesRemoteDiv = document.getElementById("updates-remote");
   const conflictsDiv = document.getElementById("conflicts");
-  const directionImg = document.getElementById("direction");
   const normalButtons = document.getElementById("normal-buttons");
   const conflictButtons = document.getElementById("conflict-buttons");
 
   const spinner1 = document.getElementById("spinner1");
-
-  // Hide direction image for bidirectional sync
-  directionImg.classList.add("display-none");
 
   // Helper to append URL span to a list item
   function appendUrlSpan(li, url) {
@@ -158,11 +157,26 @@ document.addEventListener("DOMContentLoaded", async function () {
     );
   }
 
-  // Generic section creator
-  function createSection(title, items, itemCreator = createListItem) {
+  // Generic section creator with optional icon
+  function createSection(
+    title,
+    items,
+    itemCreator = createListItem,
+    iconSrc = null,
+  ) {
     const section = document.createElement("div");
     const h2 = document.createElement("h2");
-    h2.textContent = title;
+
+    if (iconSrc) {
+      const icon = document.createElement("img");
+      icon.src = iconSrc;
+      icon.alt = title;
+      icon.classList.add("direction-icon");
+      h2.appendChild(icon);
+      h2.appendChild(document.createTextNode(" " + title));
+    } else {
+      h2.textContent = title;
+    }
     section.appendChild(h2);
 
     const ul = document.createElement("ul");
@@ -172,64 +186,31 @@ document.addEventListener("DOMContentLoaded", async function () {
     return section;
   }
 
-  // Combine local and remote changes for display
-  const allInsertions = [
-    ...(localChanges?.insertions || []).map((b) => ({
-      ...b,
-      direction: "local",
-    })),
-    ...(remoteChanges?.insertions || []).map((b) => ({
-      ...b,
-      direction: "remote",
-    })),
-  ];
-  const allDeletions = [
-    ...(localChanges?.deletions || []).map((b) => ({
-      ...b,
-      direction: "local",
-    })),
-    ...(remoteChanges?.deletions || []).map((b) => ({
-      ...b,
-      direction: "remote",
-    })),
-  ];
-  const allUpdates = [
-    ...(localChanges?.updates || []).map((u) => ({
-      ...u,
-      direction: "local",
-    })),
-    ...(remoteChanges?.updates || []).map((u) => ({
-      ...u,
-      direction: "remote",
-    })),
-  ];
+  // Separate changes by direction
+  // local = from remote to local (cloud2machine)
+  // remote = from local to remote (machine2cloud)
+  const insertionsLocal = localChanges?.insertions || [];
+  const insertionsRemote = remoteChanges?.insertions || [];
+  const deletionsLocal = localChanges?.deletions || [];
+  const deletionsRemote = remoteChanges?.deletions || [];
+  const updatesLocal = localChanges?.updates || [];
+  const updatesRemote = remoteChanges?.updates || [];
 
-  function createDirectionalListItem(bookmark) {
-    const directionLabel =
-      bookmark.direction === "local" ? " (from remote)" : " (to remote)";
-    const span = document.createElement("span");
-    span.classList.add("direction-label");
-    span.textContent = directionLabel;
-    return createBookmarkListItem(bookmark, { afterTitle: span });
-  }
-
-  function createDirectionalUpdateItem(update) {
+  function createUpdateItem(update) {
     const changeSpan = document.createElement("span");
     changeSpan.classList.add("change-info");
 
     const attr = update.changedAttribute;
     const oldVal = update.oldBookmark[attr];
     const newVal = update.newBookmark[attr];
-    const directionLabel =
-      update.direction === "local" ? " (from remote)" : " (to remote)";
 
     let changeText;
     if (attr === "path") {
-      changeText = ` (${attr}: ${oldVal.join(" > ")} → ${newVal.join(" > ")})${directionLabel}`;
+      changeText = ` (${attr}: ${oldVal.join(" > ")} → ${newVal.join(" > ")})`;
     } else if (attr === "index") {
-      changeText = ` (position: ${oldVal} → ${newVal})${directionLabel}`;
+      changeText = ` (position: ${oldVal} → ${newVal})`;
     } else {
-      changeText = ` (${attr}: ${oldVal} → ${newVal})${directionLabel}`;
+      changeText = ` (${attr}: ${oldVal} → ${newVal})`;
     }
     changeSpan.textContent = changeText;
 
@@ -238,28 +219,58 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
   }
 
-  if (allInsertions.length > 0) {
-    insertionsDiv.appendChild(
-      createSection("Insert:", allInsertions, createDirectionalListItem),
+  const cloud2machine = "../icons/cloud2machine.svg";
+  const machine2cloud = "../icons/machine2cloud.svg";
+
+  // Insertions
+  if (insertionsLocal.length > 0) {
+    insertionsLocalDiv.appendChild(
+      createSection("Insert:", insertionsLocal, createListItem, cloud2machine),
     );
   } else {
-    insertionsDiv.remove();
+    insertionsLocalDiv.remove();
   }
 
-  if (allDeletions.length > 0) {
-    deletionsDiv.appendChild(
-      createSection("Delete:", allDeletions, createDirectionalListItem),
+  if (insertionsRemote.length > 0) {
+    insertionsRemoteDiv.appendChild(
+      createSection("Insert:", insertionsRemote, createListItem, machine2cloud),
     );
   } else {
-    deletionsDiv.remove();
+    insertionsRemoteDiv.remove();
   }
 
-  if (allUpdates.length > 0) {
-    updatesDiv.appendChild(
-      createSection("Updated:", allUpdates, createDirectionalUpdateItem),
+  // Deletions
+  if (deletionsLocal.length > 0) {
+    deletionsLocalDiv.appendChild(
+      createSection("Delete:", deletionsLocal, createListItem, cloud2machine),
     );
   } else {
-    updatesDiv.remove();
+    deletionsLocalDiv.remove();
+  }
+
+  if (deletionsRemote.length > 0) {
+    deletionsRemoteDiv.appendChild(
+      createSection("Delete:", deletionsRemote, createListItem, machine2cloud),
+    );
+  } else {
+    deletionsRemoteDiv.remove();
+  }
+
+  // Updates
+  if (updatesLocal.length > 0) {
+    updatesLocalDiv.appendChild(
+      createSection("Update:", updatesLocal, createUpdateItem, cloud2machine),
+    );
+  } else {
+    updatesLocalDiv.remove();
+  }
+
+  if (updatesRemote.length > 0) {
+    updatesRemoteDiv.appendChild(
+      createSection("Update:", updatesRemote, createUpdateItem, machine2cloud),
+    );
+  } else {
+    updatesRemoteDiv.remove();
   }
 
   if (conflicts && conflicts.length > 0) {

@@ -545,8 +545,8 @@ async function syncAllBookmarks(
       // Has conflicts - show conflict resolution UI
       await displayConfirmationPage(
         {
-          localChanges: { insertions: [], deletions: [], updateIndexes: [] },
-          remoteChanges: { insertions: [], deletions: [], updateIndexes: [] },
+          localChanges: { insertions: [], deletions: [], updates: [] },
+          remoteChanges: { insertions: [], deletions: [], updates: [] },
         },
         "Conflict",
         localBookmarks,
@@ -1113,12 +1113,18 @@ async function handleConflictRemote(config) {
   const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
   await modifyLocalBookmarks(changes.deletions, changes.insertions);
 
-  const currentLocalBookmarks = await getLocalBookmarksSnapshot();
-  const indexChanges = calcBookmarkChanges(
-    remoteBookmarks,
-    currentLocalBookmarks,
-  );
-  await applyLocalBookmarkUpdates(indexChanges.updateIndexes);
+  // Apply index updates
+  for (const update of changes.updateIndexes) {
+    const id = await locateBookmarkId(
+      update.url,
+      update.title,
+      update.oldIndex,
+      update.path,
+    );
+    if (id) {
+      await browser.bookmarks.move(id, { index: update.index });
+    }
+  }
 
   // For conflict-remote, we accept remote as-is, so .old becomes the previous remote
   // and .json stays as remote (no change needed to .json)

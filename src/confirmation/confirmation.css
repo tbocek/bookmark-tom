@@ -52,6 +52,19 @@ li {
     font-style: italic;
 }
 
+.change-info {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
+}
+
+.direction-icon {
+    width: 24px;
+    height: 24px;
+    vertical-align: middle;
+    margin-right: 5px;
+}
+
 .buttons {
     margin-top: 20px;
 }
