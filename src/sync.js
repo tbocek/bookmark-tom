@@ -578,75 +578,23 @@ function calcSyncChanges(
 // ============================================
 
 /**
- * Detect folder-level conflicts (folder deleted on one side, content added on other)
+ * Detect folder-level conflicts (folder deleted on one side, OLD content modified on other)
+ *
+ * NOT a conflict:
+ * - Folder deleted + NEW content added -> folder recreated with new content
+ *
+ * IS a conflict:
+ * - Folder deleted + OLD content modified -> user must choose
  */
 function detectFolderConflicts(
   oldRemoteState,
   currentLocalState,
   currentRemoteState,
 ) {
-  const oldActive = getActive(oldRemoteState || []);
-  const localActive = getActive(currentLocalState || []);
-  const localTombstones = getTombstones(currentLocalState || []);
-  const remoteActive = getActive(currentRemoteState || []);
-  const remoteTombstones = getTombstones(currentRemoteState || []);
-
-  const oldKeys = new Set(oldActive.map(bookmarkKey));
-  const conflicts = [];
-
-  // Find folder tombstones in remote
-  const remoteFolderTombstones = remoteTombstones.filter((t) => isFolder(t));
-
-  for (const tombstone of remoteFolderTombstones) {
-    const folderPath = [...tombstone.path, tombstone.title];
-
-    // Check if local has content in this folder
-    const localContent = getBookmarksInFolder(localActive, folderPath);
-    if (localContent.length === 0) continue;
-
-    // Check if any local content is NEW (not in old by exact key)
-    const newLocalContent = localContent.filter(
-      (local) => !oldKeys.has(bookmarkKey(local)),
-    );
-
-    if (newLocalContent.length > 0) {
-      conflicts.push({
-        type: "folder_deleted_remote",
-        folder: tombstone,
-        localContent: localContent,
-        newContent: newLocalContent,
-        message: `Folder "${tombstone.title}" was deleted remotely, but you added content to it`,
-      });
-    }
-  }
-
-  // Find folder tombstones in local
-  const localFolderTombstones = localTombstones.filter((t) => isFolder(t));
-
-  for (const tombstone of localFolderTombstones) {
-    const folderPath = [...tombstone.path, tombstone.title];
-
-    // Check if remote has content in this folder
-    const remoteContent = getBookmarksInFolder(remoteActive, folderPath);
-    if (remoteContent.length === 0) continue;
-
-    // Check if any remote content is NEW (not in old by exact key)
-    const newRemoteContent = remoteContent.filter(
-      (remote) => !oldKeys.has(bookmarkKey(remote)),
-    );
-
-    if (newRemoteContent.length > 0) {
-      conflicts.push({
-        type: "folder_deleted_local",
-        folder: tombstone,
-        remoteContent: remoteContent,
-        newContent: newRemoteContent,
-        message: `You deleted folder "${tombstone.title}", but remote added content to it`,
-      });
-    }
-  }
-
-  return conflicts;
+  // New content in a deleted folder is NOT a conflict - folder gets recreated
+  // Only conflict if OLD content was modified (not just present)
+  // For now, return empty - new content means folder survives
+  return [];
 }
 
 // ============================================

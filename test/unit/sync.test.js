@@ -1062,6 +1062,132 @@ describe("3-State Sync Algorithm", () => {
   });
 
   // ============================================
+  // FOLDER DELETE + NEW CONTENT (NOT a conflict)
+  // ============================================
+
+  describe("Folder Delete + New Content", () => {
+    it("Case 33: A deletes folder with b,f - B adds c to folder -> NOT conflict, folder recreated with c", () => {
+      // Initial: Test123 folder with b, f inside
+      // A deletes Test123 (and b, f), syncs -> remote has tombstones
+      // B adds c to Test123
+      // B syncs -> NOT a conflict. Folder recreated, c pushed to remote
+
+      const oldRemoteState = [
+        { title: "Test123", path: ["Bookmarks Toolbar"], index: 10 },
+        {
+          title: "b",
+          url: "http://b/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 0,
+        },
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 1,
+        },
+      ];
+      const currentLocalState = [
+        { title: "Test123", path: ["Bookmarks Toolbar"], index: 10 },
+        {
+          title: "b",
+          url: "http://b/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 0,
+        },
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 1,
+        },
+        {
+          title: "c",
+          url: "http://c/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 2,
+        }, // NEW
+      ];
+      const currentRemoteState = [
+        {
+          title: "Test123",
+          path: ["Bookmarks Toolbar"],
+          index: 10,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        {
+          title: "b",
+          url: "http://b/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Bookmarks Toolbar", "Test123"],
+          index: 1,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      const folderConflicts = detectFolderConflicts(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // Should NOT be a conflict - new content means folder survives
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // c should be pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "c")).to.be
+        .true;
+    });
+
+    it("Case 34: A deletes folder - B adds NEW bookmark to folder -> NOT conflict", () => {
+      // Initial: empty folder F
+      // A deletes F, syncs -> remote has tombstone for F
+      // B adds Y to F
+      // B syncs -> NOT conflict, F recreated with Y
+
+      const oldRemoteState = [{ title: "F", path: ["Toolbar"], index: 0 }];
+      const currentLocalState = [
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "Y", url: "http://y.com", path: ["Toolbar", "F"], index: 0 }, // NEW
+      ];
+      const currentRemoteState = [
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const folderConflicts = detectFolderConflicts(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // Should NOT be a conflict
+      expect(folderConflicts).to.be.empty;
+    });
+  });
+
+  // ============================================
   // INDEX SHIFT (not a real edit)
   // ============================================
 

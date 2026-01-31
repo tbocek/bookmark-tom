@@ -194,14 +194,16 @@ async function createFolderPath(
   const bookmarkTree = await browser.bookmarks.getTree();
   let currentParentId = bookmarkTree[0].children[0].id;
 
+  let startIndex = 0;
   for (const root of bookmarkTree[0].children) {
     if (root.title === pathArray[0]) {
       currentParentId = root.id;
+      startIndex = 1; // Skip the root folder in the loop
       break;
     }
   }
 
-  for (let i = 0; i < pathArray.length; i++) {
+  for (let i = startIndex; i < pathArray.length; i++) {
     const folderName = pathArray[i];
 
     const children = await browser.bookmarks.getChildren(currentParentId);

@@ -233,9 +233,10 @@ async function syncAllBookmarks(
 //************************** MESSAGE HANDLERS **************************
 
 async function handleSync(config) {
-  const { localChanges, remoteBookmarks, pendingNewState } =
+  const { localChanges, remoteChanges, remoteBookmarks, pendingNewState } =
     await browser.storage.local.get([
       "localChanges",
+      "remoteChanges",
       "remoteBookmarks",
       "pendingNewState",
     ]);
@@ -251,6 +252,38 @@ async function handleSync(config) {
         (path) => removeLocalTombstonesForPath(path, arraysEqual),
       );
       await applyLocalUpdates(localChanges.updates || []);
+    } finally {
+      syncInProgress = false;
+    }
+  }
+
+  // Ensure items being pushed to remote also exist locally
+  // (they may have been cascade-deleted when parent folder was deleted)
+  if (remoteChanges?.insertions?.length > 0) {
+    syncInProgress = true;
+    try {
+      for (const item of remoteChanges.insertions) {
+        const exists = await locateBookmarkId(
+          item.url,
+          item.title,
+          null,
+          item.path,
+        );
+        if (!exists) {
+          // Create parent folder if needed, then create bookmark
+          const parentId = await locateParentId(item.path, true);
+          if (parentId) {
+            await browser.bookmarks.create({
+              parentId,
+              title: item.title,
+              url: item.url,
+              index: item.index,
+            });
+            // Remove tombstones for this path (folder was recreated)
+            await removeLocalTombstonesForPath(item.path, arraysEqual);
+          }
+        }
+      }
     } finally {
       syncInProgress = false;
     }
@@ -588,6 +621,19 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       await handleSyncAllBookmarks(config, sendResponse);
     } else if (message.command === "clearRemoteTombstones") {
       return await handleClearRemoteTombstones(config, message.maxAgeDays);
+    } else if (message.command === "initializeFromRemote") {
+      if (config.url) {
+        const remoteData = await fetchWebDAV(
+          config.url,
+          config.username,
+          config.password,
+        );
+        if (remoteData) {
+          await saveLastSyncedState(getActive(remoteData));
+          return { success: true };
+        }
+      }
+      return { success: false };
     }
   } catch (error) {
     console.error("Error in message handler:", error);
@@ -623,6 +669,25 @@ async function debounceBookmarkSync(localMaster) {
     await initializeBookmarkIdMap();
 
     const config = await loadConfig();
+
+    // On first run, initialize lastSyncedState from remote
+    const lastSyncedState = await getLastSyncedState();
+    if (!lastSyncedState || lastSyncedState.length === 0) {
+      if (config.url) {
+        const remoteData = await fetchWebDAV(
+          config.url,
+          config.username,
+          config.password,
+        );
+        if (remoteData) {
+          await saveLastSyncedState(getActive(remoteData));
+          await browser.storage.local.set({
+            message: `Initialized from remote: ${formatSyncTime()}`,
+          });
+        }
+      }
+    }
+
     await syncAllBookmarks(
       config.url,
       config.username,

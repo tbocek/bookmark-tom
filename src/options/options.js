@@ -104,6 +104,8 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       if (success) {
         storeConfiguration();
+        // Initialize lastSyncedState from remote
+        await browser.runtime.sendMessage({ command: "initializeFromRemote" });
         statusDiv.innerText = "Connection successfully tested. ";
       } else {
         throw new Error("Failed to connect to WebDAV server.");
