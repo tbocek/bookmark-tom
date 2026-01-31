@@ -1,18 +1,9 @@
 /**
  * Browser bookmark operations
  * Functions for reading, modifying, and managing local bookmarks
+ *
+ * Note: Uses arraysEqual() from sync.js (loaded first via manifest)
  */
-
-// ============================================
-// HELPERS
-// ============================================
-
-function arraysEqual(arr1, arr2) {
-  if (!arr1 && !arr2) return true;
-  if (!arr1 || !arr2) return false;
-  if (arr1.length !== arr2.length) return false;
-  return arr1.every((val, idx) => val === arr2[idx]);
-}
 
 // ============================================
 // READ OPERATIONS
@@ -281,10 +272,6 @@ async function modifyLocalBookmarks(
         });
 
         if (hasNewInsert || hasNewUpdate) {
-          console.log(
-            "Skipping folder deletion - new content targets folder:",
-            delBookmark.title,
-          );
           if (removeLocalTombstonesForPath) {
             await removeLocalTombstonesForPath(folderPath);
           }

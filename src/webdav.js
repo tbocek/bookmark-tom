@@ -31,14 +31,6 @@ async function fetchWebDAV(url, username, password) {
       credentials: "omit",
     });
 
-    console.log("WebDAV fetch:", {
-      url,
-      urlType: typeof url,
-      urlLength: url ? url.length : 0,
-      status: response.status,
-      ok: response.ok,
-    });
-
     if (response.status === 404) {
       return null;
     }
@@ -47,7 +39,6 @@ async function fetchWebDAV(url, username, password) {
     }
 
     const text = await response.text();
-    console.log("WebDAV response (first 200 chars):", text.substring(0, 200));
 
     if (!text || text.trim() === "") {
       return null;
@@ -83,8 +74,6 @@ async function loadConfig() {
     "webdavPassword",
     "checkIntervalMinutes",
   ]);
-
-  console.log("loadConfig result:", result);
 
   return {
     url: result.webdavUrl || "",

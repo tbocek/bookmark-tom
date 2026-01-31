@@ -21,10 +21,38 @@ let confirmationTabId = null;
 let pendingConfirmation = null;
 let debounceTimer = null;
 
+// In-memory data for confirmation page (avoids storage for transient communication)
+let confirmationData = null;
+
 //************************** UTILITY FUNCTIONS **************************
 
 function formatSyncTime() {
   return new Date().toLocaleString();
+}
+
+/**
+ * Determine if a tombstone should be kept or filtered out
+ * - Folder tombstones: remove if folder has content (path prefix check)
+ * - All tombstones: remove if revived (3-of-4 match)
+ */
+function shouldKeepTombstone(tombstone, activeBookmarks) {
+  // For folders: check if any bookmark has path inside this folder
+  if (!tombstone.url) {
+    const folderPath = [...tombstone.path, tombstone.title];
+    const hasContent = activeBookmarks.some((bm) => {
+      if (bm.path.length >= folderPath.length) {
+        return folderPath.every((segment, i) => bm.path[i] === segment);
+      }
+      return false;
+    });
+    if (hasContent) return false; // folder has content, remove tombstone
+  }
+
+  // For bookmarks (and folders without content): check 3-of-4 match
+  const revived = activeBookmarks.some((bm) => match3of4(tombstone, bm));
+  if (revived) return false; // bookmark revived, remove tombstone
+
+  return true; // keep tombstone
 }
 
 //************************** UI FUNCTIONS **************************
@@ -38,14 +66,16 @@ async function displayConfirmationPage(
 ) {
   const { localChanges, remoteChanges } = changes;
 
-  await browser.storage.local.set({
-    localChanges: localChanges,
-    remoteChanges: remoteChanges,
-    action: action,
-    localBookmarks: localBookmarks,
-    remoteBookmarks: remoteBookmarks,
-    conflicts: conflicts,
-  });
+  // Store in memory for confirmation page and handlers (avoids storage)
+  confirmationData = {
+    localChanges,
+    remoteChanges,
+    action,
+    localBookmarks,
+    remoteBookmarks,
+    conflicts,
+    pendingNewState: null, // Will be set by caller if needed
+  };
 
   const confirmationPageUrl = browser.runtime.getURL(
     "confirmation/confirmation.html",
@@ -180,14 +210,9 @@ async function syncAllBookmarks(
     currentRemoteState,
   );
 
-  // Also check for folder-level conflicts
-  const folderConflicts = detectFolderConflicts(
-    oldRemoteState,
-    currentLocalState,
-    currentRemoteState,
-  );
-
-  const allConflicts = [...conflicts, ...folderConflicts];
+  // Note: folder conflicts (deleted folder + new content) are handled automatically
+  // by the sync algorithm - folder survives if it has new content
+  const allConflicts = conflicts;
 
   // Check if there are any changes
   const hasChanges =
@@ -203,9 +228,6 @@ async function syncAllBookmarks(
     return;
   }
 
-  // Store newState for use in handlers
-  await browser.storage.local.set({ pendingNewState: newState });
-
   const showConfirmation = async () => {
     await displayConfirmationPage(
       { localChanges, remoteChanges },
@@ -214,6 +236,8 @@ async function syncAllBookmarks(
       remoteData,
       allConflicts,
     );
+    // Store newState for handlers (after displayConfirmationPage sets up confirmationData)
+    confirmationData.pendingNewState = newState;
   };
 
   if (fromBackgroundTimer) {
@@ -233,13 +257,9 @@ async function syncAllBookmarks(
 //************************** MESSAGE HANDLERS **************************
 
 async function handleSync(config) {
+  // Get data from in-memory confirmationData (not storage)
   const { localChanges, remoteChanges, remoteBookmarks, pendingNewState } =
-    await browser.storage.local.get([
-      "localChanges",
-      "remoteChanges",
-      "remoteBookmarks",
-      "pendingNewState",
-    ]);
+    confirmationData || {};
 
   // Apply local changes (deletions and insertions)
   if (localChanges) {
@@ -296,11 +316,9 @@ async function handleSync(config) {
   const newStateTombstones = getTombstones(pendingNewState || []);
 
   // Filter out tombstones for items that now exist
-  const filteredTombstones = newStateTombstones.filter((tombstone) => {
-    // Check if there's a matching active bookmark
-    const revived = finalBookmarks.some((bm) => match3of4(tombstone, bm));
-    return !revived;
-  });
+  const filteredTombstones = newStateTombstones.filter((tombstone) =>
+    shouldKeepTombstone(tombstone, finalBookmarks),
+  );
 
   // Create new remote data
   let newRemoteData = [...finalBookmarks, ...filteredTombstones];
@@ -371,22 +389,10 @@ async function handleConflictLocal(config) {
   const localBookmarks = await getLocalBookmarksSnapshot();
   const localTombstones = await getLocalTombstones();
 
-  // Filter out tombstones for folders that exist locally
-  const filteredTombstones = localTombstones.filter((tombstone) => {
-    if (!tombstone.url) {
-      const folderPath = [...tombstone.path, tombstone.title];
-      const folderExists = localBookmarks.some((bm) => {
-        if (bm.path.length >= folderPath.length) {
-          return folderPath.every((segment, i) => bm.path[i] === segment);
-        }
-        return false;
-      });
-      if (folderExists) {
-        return false;
-      }
-    }
-    return true;
-  });
+  // Filter out tombstones for items that exist locally
+  const filteredTombstones = localTombstones.filter((tombstone) =>
+    shouldKeepTombstone(tombstone, localBookmarks),
+  );
 
   // Push local state to remote
   const newRemoteData = [...localBookmarks, ...filteredTombstones];
@@ -405,9 +411,8 @@ async function handleConflictLocal(config) {
 }
 
 async function handleConflictRemote(config) {
-  const { remoteBookmarks } = await browser.storage.local.get([
-    "remoteBookmarks",
-  ]);
+  // Get data from in-memory confirmationData (not storage)
+  const { remoteBookmarks } = confirmationData || {};
   const localBookmarks = await getLocalBookmarksSnapshot();
 
   const remoteActive = getActive(remoteBookmarks || []);
@@ -478,22 +483,10 @@ async function handleConflictRemote(config) {
 
   const finalBookmarks = await getLocalBookmarksSnapshot();
 
-  // Filter tombstones
-  const filteredTombstones = remoteTombstones.filter((tombstone) => {
-    if (!tombstone.url) {
-      const folderPath = [...tombstone.path, tombstone.title];
-      const folderExists = finalBookmarks.some((bm) => {
-        if (bm.path.length >= folderPath.length) {
-          return folderPath.every((segment, i) => bm.path[i] === segment);
-        }
-        return false;
-      });
-      if (folderExists) {
-        return false;
-      }
-    }
-    return true;
-  });
+  // Filter tombstones for items that exist
+  const filteredTombstones = remoteTombstones.filter((tombstone) =>
+    shouldKeepTombstone(tombstone, finalBookmarks),
+  );
 
   await saveLocalTombstones(filteredTombstones);
   await saveLastSyncedState(finalBookmarks);
@@ -618,7 +611,6 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
     "Bookmarks Menu",
   ];
   if (parentPath.length === 0 && rootFolders.includes(node.title)) {
-    console.log(`Skipping tombstone for root folder: ${node.title}`);
     await debounceBookmarkSync(true);
     return;
   }
@@ -688,6 +680,11 @@ const messageHandlers = {
 
 browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   try {
+    // Handle confirmation page data request (no config needed)
+    if (message.command === "getConfirmationData") {
+      return confirmationData;
+    }
+
     const config = await loadConfig();
 
     if (message.action && messageHandlers[message.action]) {
