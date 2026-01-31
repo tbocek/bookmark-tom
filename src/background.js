@@ -1128,14 +1128,42 @@ browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
 browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
   await recordChange("removed", id, removeInfo);
 
-  // Add tombstone for deleted bookmark
-  const path = await getBookmarkPath(removeInfo.parentId);
+  // Add tombstones for deleted bookmark and all its contents (if folder)
+  const parentPath = await getBookmarkPath(removeInfo.parentId);
+  const node = removeInfo.node;
+
+  // Create tombstone for the removed node itself
   const bookmark = {
-    title: removeInfo.node.title,
-    url: removeInfo.node.url,
-    path: path,
+    title: node.title,
+    url: node.url,
+    path: parentPath,
   };
   await addLocalTombstone(bookmark);
+
+  // If it's a folder, find all children from our bookmarkIdMap and create tombstones
+  // Firefox doesn't provide children in removeInfo.node, so we use our tracking map
+  if (node.type === "folder") {
+    const bookmarkIdMap = await getBookmarkIdMap();
+    const folderPath = [...parentPath, node.title];
+
+    // Find all bookmarks whose path starts with this folder's path
+    for (const [bmId, bmData] of Object.entries(bookmarkIdMap)) {
+      if (bmData.path && bmData.path.length >= folderPath.length) {
+        // Check if this bookmark's path starts with the deleted folder's path
+        const pathMatches = folderPath.every(
+          (segment, i) => bmData.path[i] === segment,
+        );
+        if (pathMatches) {
+          await addLocalTombstone({
+            title: bmData.title,
+            url: bmData.url,
+            path: bmData.path,
+          });
+        }
+      }
+    }
+  }
+
   await debounceBookmarkSync(true);
 });
 
