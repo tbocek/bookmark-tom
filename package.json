@@ -17,10 +17,10 @@
     "test": "npx mocha --require test/setup.js test/unit/*.js"
   },
   "devDependencies": {
-    "web-ext": "^8.2.0",
-    "semver": "^7.6.3",
-    "mocha": "^10.7.0",
-    "sinon": "^18.0.0",
-    "chai": "^5.1.1"
+    "web-ext": "^9.2.0",
+    "semver": "^7.7.3",
+    "mocha": "^11.7.5",
+    "sinon": "^21.0.1",
+    "chai": "^6.2.2"
   }
 }

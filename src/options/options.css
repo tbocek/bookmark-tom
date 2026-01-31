@@ -1,12 +1,16 @@
+@import url("../common.css");
+
 body {
     font-family: Arial, sans-serif;
     margin: 1em;
     font-size: medium;
 }
+
 label {
     display: block;
     margin-top: 1em;
 }
+
 input {
     padding: 0.5em;
     box-sizing: border-box;
@@ -14,57 +18,38 @@ input {
     border: 1px solid #aaa;
     font-size: medium;
 }
-button {
-    text-align: center;
-    vertical-align: center;
-    padding: 0.5em;
-    font-size: medium;
-    cursor: pointer;
-    border-radius: 8px;
-    border: none;
-    margin-right: 1em;
-    color: white;
-}
+
 img {
     width: 1em;
     height: 1em;
 }
+
 .success {
     color: green;
 }
+
 .error {
     color: red;
 }
-.spinner {
-    display: inline-block;
-    width: 1.5em;
-    height: 1.5em;
-    border: 3px solid rgba(0, 0, 0, 0.3);
-    border-radius: 50%;
-    border-top-color: #000;
-    animation: spin 1s ease-in-out infinite;
-    vertical-align: middle;
-}
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-.button-text {
-    padding: 1em;
-}
+
 .button-text-black {
     padding: 1em;
     color: #000;
 }
+
 .container {
     display: flex;
     flex-direction: row;
 }
+
 #status {
     margin-top: 1em;
 }
+
 #save-button {
     background-color: #28a745;
 }
+
 #test-button {
     background-color: #007bff;
 }

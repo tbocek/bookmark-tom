@@ -1,32 +1,48 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Confirm Changes</title>
-    <link rel="stylesheet" href="confirmation.css">
-</head>
-<body>
-<div class="side">
-    <img src="../icons/logo.svg" alt="Logo" width="100" class="logo">
-    <h1>Confirm Bookmark Changes</h1>
-    <img alt="Direction" width="100" class="direction" id="direction">
-</div>
-<div id="insertions" class="content-div"></div>
-<div id="deletions" class="content-div"></div>
-<div class="buttons">
-    <button id="confirm-force">
-        <span class="button-text">Proceed</span>
-        <div id="spinner1" class="spinner" style="visibility:hidden;"></div>
-    </button>
-    <button id="confirm-merge" disabled="true">
-        <span class="button-text">Proceed (merge, do not delete)</span>
-        <div id="spinner2" class="spinner" style="visibility:hidden;"></div>
-    </button>
-    <button id="cancel">
-        <span class="button-text">Cancel</span>
-        <div id="spinner3" class="spinner" style="visibility:hidden;"></div>
-    </button>
-</div>
-<script src="confirmation.js"></script>
-</body>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Confirm Changes</title>
+        <link rel="stylesheet" href="confirmation.css" />
+    </head>
+    <body>
+        <div class="side">
+            <img src="../icons/logo.svg" alt="Logo" width="100" class="logo" />
+            <h1>Confirm Bookmark Changes</h1>
+            <img alt="Direction" width="100" class="direction" id="direction" />
+        </div>
+        <div id="insertions" class="content-div"></div>
+        <div id="deletions" class="content-div"></div>
+        <div id="reorders" class="content-div"></div>
+        <div id="conflicts" class="content-div"></div>
+        <div class="buttons" id="normal-buttons">
+            <button id="confirm-force">
+                <span class="button-text">Proceed</span>
+                <div id="spinner1" class="spinner hidden"></div>
+            </button>
+            <button id="confirm-merge" disabled="true">
+                <span class="button-text">Proceed (merge, do not delete)</span>
+                <div id="spinner2" class="spinner hidden"></div>
+            </button>
+            <button id="cancel">
+                <span class="button-text">Cancel</span>
+                <div id="spinner3" class="spinner hidden"></div>
+            </button>
+        </div>
+        <div class="buttons display-none" id="conflict-buttons">
+            <button id="conflict-local">
+                <span class="button-text">Proceed (local master)</span>
+                <div id="spinner4" class="spinner hidden"></div>
+            </button>
+            <button id="conflict-remote">
+                <span class="button-text">Proceed (remote master)</span>
+                <div id="spinner5" class="spinner hidden"></div>
+            </button>
+            <button id="conflict-cancel">
+                <span class="button-text">Cancel</span>
+                <div id="spinner6" class="spinner hidden"></div>
+            </button>
+        </div>
+        <script src="confirmation.js"></script>
+    </body>
 </html>

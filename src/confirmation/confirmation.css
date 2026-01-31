@@ -1,16 +1,21 @@
+@import url("../common.css");
+
 body {
     font-family: Arial, sans-serif;
     padding: 20px;
     background-color: #f9f9f9;
 }
+
 h1 {
     font-size: 24px;
     margin-left: 20px;
 }
+
 .side {
     display: flex;
     align-items: center;
 }
+
 h2 {
     font-size: 18px;
     margin-top: 20px;
@@ -18,10 +23,12 @@ h2 {
     justify-content: center;
     align-items: center;
 }
+
 ul {
     list-style: none;
     padding: 0;
 }
+
 li {
     background: #fff;
     padding: 10px;
@@ -29,71 +36,80 @@ li {
     border: 1px solid #ddd;
     border-radius: 5px;
 }
+
 .url {
     font-size: 13px;
 }
+
 .path {
     font-size: 12px;
     color: #555;
 }
-.action-icon {
-    vertical-align: middle;
-    margin-right: 10px;
+
+.index-change {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
 }
-.spinner {
-    display: inline-block;
-    width: 1.5em;
-    height: 1.5em;
-    border: 3px solid rgba(0, 0, 0, 0.3);
-    border-radius: 50%;
-    border-top-color: #000;
-    animation: spin 1s ease-in-out infinite;
-    vertical-align: middle;
-}
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-.button-text {
-    padding: 1em;
-}
+
 .buttons {
     margin-top: 20px;
 }
-button {
-    text-align: center;
-    vertical-align: center;
-    padding: 0.5em;
-    font-size: medium;
-    cursor: pointer;
-    border-radius: 8px;
-    border: none;
-    margin-right: 1em;
-    color: white;
-}
+
+/* Button color overrides */
 #confirm-merge {
     background-color: #28a745;
-    color: white;
 }
+
 #confirm-merge:disabled {
     background-color: #94d3a2;
     cursor: not-allowed;
 }
-#confirm-force {
+
+#confirm-force,
+#conflict-local {
     background-color: #007bff;
-    color: white;
 }
-#cancel {
+
+#cancel,
+#conflict-cancel {
     background-color: #dc3545;
-    color: white;
 }
-.icon {
-    width: 64px;
-    margin-left: 10px;
+
+#conflict-remote {
+    background-color: #28a745;
+}
+
+/* Conflict styles */
+.conflict-item {
+    border-left: 4px solid #ffc107;
+}
+
+.conflict-details {
+    margin-top: 10px;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.conflict-detail {
+    margin: 4px 0;
+}
+
+.conflict-label {
+    font-weight: bold;
+    color: #495057;
+}
+
+.conflict-deleted {
+    color: #dc3545;
+    font-style: italic;
 }
 
 .content-div {
     display: inline-block;
-    width: 40em; /* Fixed width for all content divs */
-    text-align: left; /* Ensure content is left-aligned within the div */
-    margin-bottom: 20px; /* Add some space between the content sections */
+    width: 40em;
+    text-align: left;
+    margin-bottom: 20px;
 }

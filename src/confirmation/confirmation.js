@@ -1,94 +1,253 @@
-document.addEventListener('DOMContentLoaded', async function () {
-    const storageData = await browser.storage.local.get(['insertions', 'deletions', 'updateIndexes', 'action']);
-    const { insertions, deletions, updateIndexes, action } = storageData;
+document.addEventListener("DOMContentLoaded", async function () {
+  const storageData = await browser.storage.local.get([
+    "insertions",
+    "deletions",
+    "updateIndexes",
+    "action",
+    "conflicts",
+  ]);
+  const { insertions, deletions, updateIndexes, action, conflicts } =
+    storageData;
 
-    const insertionsDiv = document.getElementById('insertions');
-    const deletionsDiv = document.getElementById('deletions');
-    const directionImg = document.getElementById('direction');
+  const insertionsDiv = document.getElementById("insertions");
+  const deletionsDiv = document.getElementById("deletions");
+  const reordersDiv = document.getElementById("reorders");
+  const conflictsDiv = document.getElementById("conflicts");
+  const directionImg = document.getElementById("direction");
+  const normalButtons = document.getElementById("normal-buttons");
+  const conflictButtons = document.getElementById("conflict-buttons");
 
-    const spinner1 = document.getElementById('spinner1');
-    const spinner2 = document.getElementById('spinner2');
+  const spinner1 = document.getElementById("spinner1");
+  const spinner2 = document.getElementById("spinner2");
 
-    const cloudToMachineSVG = '../icons/cloud2machine.svg';
-    const machineToCloudSVG = '../icons/machine2cloud.svg';
+  const cloudToMachineSVG = "../icons/cloud2machine.svg";
+  const machineToCloudSVG = "../icons/machine2cloud.svg";
 
-    directionImg.src = action === "Local Update" ? cloudToMachineSVG: machineToCloudSVG;
+  directionImg.src =
+    action === "Local Update" ? cloudToMachineSVG : machineToCloudSVG;
 
+  // Helper to append URL span to a list item
+  function appendUrlSpan(li, url) {
+    const br = document.createElement("br");
+    const span = document.createElement("span");
+    span.classList.add("url");
+    const a = document.createElement("a");
+    a.href = url;
+    a.textContent = url;
+    span.appendChild(a);
+    li.appendChild(br);
+    li.appendChild(span);
+  }
 
-    function createListItem(bookmark) {
-        const li = document.createElement('li');
-        li.textContent += bookmark.title;
+  // Helper to append path span to a list item
+  function appendPathSpan(li, path) {
+    const br = document.createElement("br");
+    const span = document.createElement("span");
+    span.classList.add("path");
+    span.textContent = path.join(" > ");
+    li.appendChild(br);
+    li.appendChild(span);
+  }
 
-        if (bookmark.url) {
-            const br = document.createElement('br');
-            let span = document.createElement('span');
-            span.classList.add('url');
-            const a = document.createElement('a');
-            a.href = bookmark.url;
-            a.textContent = bookmark.url;
-            span.appendChild(a);
-            li.appendChild(br);
-            li.appendChild(span);
-        }
-
-        const brPath = document.createElement('br');
-        const pathSpan = document.createElement('span');
-        pathSpan.classList.add('path');
-        pathSpan.textContent += bookmark.path.join(' > ');
-
-        li.appendChild(brPath);
-        li.appendChild(pathSpan);
-
-        return li;
+  // Create a bookmark list item with optional customizations
+  function createBookmarkListItem(bookmark, options = {}) {
+    const li = document.createElement("li");
+    if (options.className) {
+      li.classList.add(options.className);
     }
 
-    function createSection(title, items) {
-        const section = document.createElement('div');
-
-        const h2 = document.createElement('h2');
-        h2.textContent = title;
-        section.appendChild(h2);
-
-        const ul = document.createElement('ul');
-        items.forEach(item => ul.appendChild(createListItem(item)));
-        section.appendChild(ul);
-
-        return section;
-    }
-
-    let diffShown = false;
-    if (insertions && insertions.length > 0) {
-        const section = createSection(`Insert (${action}):`, insertions);
-        insertionsDiv.appendChild(section);
+    // Title (bold if specified)
+    if (options.boldTitle) {
+      const titleSpan = document.createElement("strong");
+      titleSpan.textContent = bookmark.title;
+      li.appendChild(titleSpan);
     } else {
-        insertionsDiv.remove();
+      li.appendChild(document.createTextNode(bookmark.title));
     }
 
-    if (deletions && deletions.length > 0) {
-        const section = createSection(`Delete (${action}):`, deletions);
-        deletionsDiv.appendChild(section);
-    } else {
-        deletionsDiv.remove();
+    // Custom content after title (e.g., index change indicator)
+    if (options.afterTitle) {
+      li.appendChild(options.afterTitle);
     }
 
-    document.getElementById('confirm-force').addEventListener('click', function () {
-        spinner1.style.visibility = 'visible';
-        browser.runtime.sendMessage({ action: action });
+    // URL
+    if (bookmark.url) {
+      appendUrlSpan(li, bookmark.url);
+    }
+
+    // Path
+    appendPathSpan(li, bookmark.path);
+
+    // Additional content at the end (e.g., conflict details)
+    if (options.appendContent) {
+      li.appendChild(options.appendContent);
+    }
+
+    return li;
+  }
+
+  function createListItem(bookmark) {
+    return createBookmarkListItem(bookmark);
+  }
+
+  function createReorderListItem(bookmark) {
+    const indexSpan = document.createElement("span");
+    indexSpan.classList.add("index-change");
+    indexSpan.textContent = ` (position: ${bookmark.oldIndex} → ${bookmark.index})`;
+
+    return createBookmarkListItem(bookmark, { afterTitle: indexSpan });
+  }
+
+  function createConflictListItem(conflict) {
+    const title =
+      conflict.local?.title ||
+      conflict.remote?.title ||
+      conflict.old?.title ||
+      "Unknown";
+    const url =
+      conflict.local?.url || conflict.remote?.url || conflict.old?.url;
+    const path =
+      conflict.local?.path || conflict.remote?.path || conflict.old?.path || [];
+
+    // Build conflict details
+    const detailsDiv = document.createElement("div");
+    detailsDiv.classList.add("conflict-details");
+
+    const createDetail = (label, bookmark) => {
+      const div = document.createElement("div");
+      div.classList.add("conflict-detail");
+      const labelSpan = document.createElement("span");
+      labelSpan.classList.add("conflict-label");
+      labelSpan.textContent = label + ": ";
+      div.appendChild(labelSpan);
+      if (bookmark) {
+        div.appendChild(
+          document.createTextNode(
+            `"${bookmark.title}" at index ${bookmark.index}`,
+          ),
+        );
+      } else {
+        const deletedSpan = document.createElement("span");
+        deletedSpan.classList.add("conflict-deleted");
+        deletedSpan.textContent = "(deleted)";
+        div.appendChild(deletedSpan);
+      }
+      return div;
+    };
+
+    detailsDiv.appendChild(createDetail("Old", conflict.old));
+    detailsDiv.appendChild(createDetail("Local", conflict.local));
+    detailsDiv.appendChild(createDetail("Remote", conflict.remote));
+
+    return createBookmarkListItem(
+      { title, url, path },
+      {
+        className: "conflict-item",
+        boldTitle: true,
+        appendContent: detailsDiv,
+      },
+    );
+  }
+
+  // Generic section creator
+  function createSection(title, items, itemCreator = createListItem) {
+    const section = document.createElement("div");
+    const h2 = document.createElement("h2");
+    h2.textContent = title;
+    section.appendChild(h2);
+
+    const ul = document.createElement("ul");
+    items.forEach((item) => ul.appendChild(itemCreator(item)));
+    section.appendChild(ul);
+
+    return section;
+  }
+
+  if (insertions && insertions.length > 0) {
+    insertionsDiv.appendChild(createSection(`Insert (${action}):`, insertions));
+  } else {
+    insertionsDiv.remove();
+  }
+
+  if (deletions && deletions.length > 0) {
+    deletionsDiv.appendChild(createSection(`Delete (${action}):`, deletions));
+  } else {
+    deletionsDiv.remove();
+  }
+
+  if (updateIndexes && updateIndexes.length > 0) {
+    reordersDiv.appendChild(
+      createSection(
+        `Reordered (${action}):`,
+        updateIndexes,
+        createReorderListItem,
+      ),
+    );
+  } else {
+    reordersDiv.remove();
+  }
+
+  if (conflicts && conflicts.length > 0) {
+    conflictsDiv.appendChild(
+      createSection("Conflicts:", conflicts, createConflictListItem),
+    );
+    // Show conflict buttons, hide normal buttons
+    normalButtons.classList.add("display-none");
+    conflictButtons.classList.remove("display-none");
+    directionImg.classList.add("display-none");
+  } else {
+    conflictsDiv.remove();
+  }
+
+  // Helper to show spinner
+  function showSpinner(spinner) {
+    spinner.classList.remove("hidden");
+  }
+
+  // Normal action buttons
+  document
+    .getElementById("confirm-force")
+    .addEventListener("click", function () {
+      showSpinner(spinner1);
+      browser.runtime.sendMessage({ action: action });
     });
 
-    const mergeBtn = document.getElementById('confirm-merge');
-    // Enable the merge button conditionally
-    if (deletions && deletions.length > 0) {
-        mergeBtn.disabled = false;
-        mergeBtn.addEventListener('click', function () {
-            spinner2.style.visibility = 'visible';
-            browser.runtime.sendMessage({ action: action + "-merge" });
-        });
-    } else {
-        mergeBtn.disabled = true;
-    }
+  const mergeBtn = document.getElementById("confirm-merge");
+  if (deletions && deletions.length > 0) {
+    mergeBtn.disabled = false;
+    mergeBtn.addEventListener("click", function () {
+      showSpinner(spinner2);
+      browser.runtime.sendMessage({ action: action + "-merge" });
+    });
+  } else {
+    mergeBtn.disabled = true;
+  }
 
-    document.getElementById('cancel').addEventListener('click', function () {
-        browser.runtime.sendMessage({ action: 'cancelChanges' });
+  document.getElementById("cancel").addEventListener("click", function () {
+    browser.runtime.sendMessage({ action: "cancelChanges" });
+  });
+
+  // Conflict resolution buttons
+  const spinner4 = document.getElementById("spinner4");
+  const spinner5 = document.getElementById("spinner5");
+
+  document
+    .getElementById("conflict-local")
+    .addEventListener("click", function () {
+      showSpinner(spinner4);
+      browser.runtime.sendMessage({ action: "Conflict-local" });
+    });
+
+  document
+    .getElementById("conflict-remote")
+    .addEventListener("click", function () {
+      showSpinner(spinner5);
+      browser.runtime.sendMessage({ action: "Conflict-remote" });
+    });
+
+  document
+    .getElementById("conflict-cancel")
+    .addEventListener("click", function () {
+      browser.runtime.sendMessage({ action: "cancelChanges" });
     });
 });
