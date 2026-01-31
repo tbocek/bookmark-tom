@@ -740,27 +740,13 @@ async function syncAllBookmarks(
 
   // Helper function to show confirmation page
   const showConfirmation = async () => {
-    if (conflicts.length > 0) {
-      // Has conflicts - show conflict resolution UI
-      await displayConfirmationPage(
-        {
-          localChanges: { insertions: [], deletions: [], updates: [] },
-          remoteChanges: { insertions: [], deletions: [], updates: [] },
-        },
-        "Conflict",
-        localBookmarks,
-        remoteData,
-        conflicts,
-      );
-    } else {
-      await displayConfirmationPage(
-        { localChanges, remoteChanges },
-        "Sync",
-        localBookmarks,
-        remoteData,
-        [],
-      );
-    }
+    await displayConfirmationPage(
+      { localChanges, remoteChanges },
+      conflicts.length > 0 ? "Conflict" : "Sync",
+      localBookmarks,
+      remoteData,
+      conflicts,
+    );
   };
 
   if (fromBackgroundTimer) {

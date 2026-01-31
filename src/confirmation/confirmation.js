@@ -107,45 +107,49 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   function createConflictListItem(conflict) {
-    const title =
-      conflict.local?.title ||
-      conflict.remote?.title ||
-      conflict.old?.title ||
-      "Unknown";
-    const url =
-      conflict.local?.url || conflict.remote?.url || conflict.old?.url;
-    const path =
-      conflict.local?.path || conflict.remote?.path || conflict.old?.path || [];
+    const title = conflict.local?.title || conflict.remote?.title || "Unknown";
+    const url = conflict.local?.url || conflict.remote?.url;
+    const path = conflict.local?.path || conflict.remote?.path || [];
+    const attr = conflict.changedAttribute;
 
-    // Build conflict details
+    // Build conflict details showing what differs
     const detailsDiv = document.createElement("div");
     detailsDiv.classList.add("conflict-details");
 
-    const createDetail = (label, bookmark) => {
+    const createDetail = (label, bookmark, highlightAttr) => {
       const div = document.createElement("div");
       div.classList.add("conflict-detail");
       const labelSpan = document.createElement("span");
       labelSpan.classList.add("conflict-label");
       labelSpan.textContent = label + ": ";
       div.appendChild(labelSpan);
+
       if (bookmark) {
-        div.appendChild(
-          document.createTextNode(
-            `"${bookmark.title}" at index ${bookmark.index}`,
-          ),
-        );
-      } else {
-        const deletedSpan = document.createElement("span");
-        deletedSpan.classList.add("conflict-deleted");
-        deletedSpan.textContent = "(deleted)";
-        div.appendChild(deletedSpan);
+        let valueText;
+        if (highlightAttr === "path") {
+          valueText = bookmark.path?.join(" > ") || "(root)";
+        } else if (highlightAttr) {
+          valueText = bookmark[highlightAttr] || "(empty)";
+        } else {
+          valueText = `"${bookmark.title}"`;
+        }
+        const valueSpan = document.createElement("span");
+        valueSpan.classList.add("conflict-value");
+        valueSpan.textContent = valueText;
+        div.appendChild(valueSpan);
       }
       return div;
     };
 
-    detailsDiv.appendChild(createDetail("Old", conflict.old));
-    detailsDiv.appendChild(createDetail("Local", conflict.local));
-    detailsDiv.appendChild(createDetail("Remote", conflict.remote));
+    // Show the changed attribute for both local and remote
+    detailsDiv.appendChild(createDetail("Local", conflict.local, attr));
+    detailsDiv.appendChild(createDetail("Remote", conflict.remote, attr));
+
+    // Add info about which attribute differs
+    const attrInfo = document.createElement("div");
+    attrInfo.classList.add("conflict-attr");
+    attrInfo.textContent = `(${attr} differs)`;
+    detailsDiv.appendChild(attrInfo);
 
     return createBookmarkListItem(
       { title, url, path },

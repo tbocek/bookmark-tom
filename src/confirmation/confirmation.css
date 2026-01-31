@@ -120,6 +120,17 @@ li {
     font-style: italic;
 }
 
+.conflict-value {
+    color: #007bff;
+    font-family: monospace;
+}
+
+.conflict-attr {
+    margin-top: 6px;
+    color: #6c757d;
+    font-style: italic;
+}
+
 .content-div {
     display: inline-block;
     width: 40em;
