@@ -53,3 +53,23 @@ img {
 #test-button {
     background-color: #007bff;
 }
+
+#clear-tombstones-button {
+    background-color: #dc3545;
+}
+
+select {
+    padding: 0.5em;
+    border-radius: 8px;
+    border: 1px solid #aaa;
+    font-size: medium;
+    margin-right: 1em;
+}
+
+h2 {
+    margin-top: 2em;
+}
+
+#tombstone-count {
+    font-weight: bold;
+}

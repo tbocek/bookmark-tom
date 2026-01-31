@@ -20,6 +20,11 @@ function arraysEqual(arr1, arr2) {
   return true;
 }
 
+// Create a unique key for bookmark identity (without index)
+function bookmarkIdentityKey(bm) {
+  return bm.title + "#" + bm.path.join("/") + "#" + (bm.url || "");
+}
+
 // Create a bookmark key for map lookups
 function bookmarkKey(bm, includeIndex = true) {
   if (includeIndex) {
@@ -71,6 +76,50 @@ function findChangedAttribute(oldBm, newBm) {
   return null;
 }
 
+// Compare two bookmarks for equality
+function bookmarksEqual(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+
+  return (
+    a.title === b.title &&
+    (a.url || "") === (b.url || "") &&
+    a.index === b.index &&
+    arraysEqual(a.path || [], b.path || [])
+  );
+}
+
+//************************** TOMBSTONE HELPERS **************************
+// Create a tombstone for a deleted bookmark
+function createTombstone(bookmark) {
+  return {
+    title: bookmark.title,
+    url: bookmark.url,
+    path: bookmark.path,
+    deleted: true,
+    deletedAt: Date.now(),
+  };
+}
+
+// Check if a bookmark matches a tombstone (by identity, not index)
+function matchesTombstone(bookmark, tombstone) {
+  return (
+    bookmark.title === tombstone.title &&
+    (bookmark.url || "") === (tombstone.url || "") &&
+    arraysEqual(bookmark.path || [], tombstone.path || [])
+  );
+}
+
+// Get active bookmarks (filter out tombstones)
+function getActiveBookmarks(bookmarks) {
+  return bookmarks.filter((b) => !b.deleted);
+}
+
+// Get tombstones from bookmark list
+function getTombstones(bookmarks) {
+  return bookmarks.filter((b) => b.deleted);
+}
+
 //************************** WEBDAV **************************
 function createWebDAVHeaders(username, password, isWrite = false) {
   const headers = new Headers();
@@ -87,16 +136,11 @@ function addCacheBuster(url) {
   return url.includes("?") ? `${url}&${cacheBuster}` : `${url}?${cacheBuster}`;
 }
 
-function getOldFileUrl(url) {
-  return url.replace(/\.json$/, ".json.old");
-}
-
-async function fetchWebDAV(url, username, password, isOldFile = false) {
-  const targetUrl = isOldFile ? getOldFileUrl(url) : url;
+async function fetchWebDAV(url, username, password) {
   const headers = createWebDAVHeaders(username, password);
 
   try {
-    const response = await fetch(addCacheBuster(targetUrl), {
+    const response = await fetch(addCacheBuster(url), {
       headers,
       credentials: "omit",
     });
@@ -111,24 +155,15 @@ async function fetchWebDAV(url, username, password, isOldFile = false) {
     const data = await response.json();
     return Array.isArray(data) ? data : null;
   } catch (error) {
-    if (isOldFile) {
-      console.warn("Could not fetch .old file:", error);
-    }
+    console.error("Error fetching from WebDAV:", error);
     return null;
   }
 }
 
-async function updateWebDAV(
-  url,
-  username,
-  password,
-  bookmarks,
-  isOldFile = false,
-) {
-  const targetUrl = isOldFile ? getOldFileUrl(url) : url;
+async function updateWebDAV(url, username, password, bookmarks) {
   const headers = createWebDAVHeaders(username, password, true);
 
-  const response = await fetch(targetUrl, {
+  const response = await fetch(url, {
     method: "PUT",
     headers,
     credentials: "omit",
@@ -377,6 +412,26 @@ async function locateParentId(pathArray) {
   return searchTree(bookmarkTree[0].children, pathArray);
 }
 
+//************************** LOCAL TOMBSTONE STORAGE **************************
+async function getLocalTombstones() {
+  const storage = await browser.storage.local.get(["tombstones"]);
+  return storage.tombstones || [];
+}
+
+async function saveLocalTombstones(tombstones) {
+  await browser.storage.local.set({ tombstones });
+}
+
+async function addLocalTombstone(bookmark) {
+  const tombstones = await getLocalTombstones();
+  // Check if tombstone already exists
+  const exists = tombstones.some((t) => matchesTombstone(bookmark, t));
+  if (!exists) {
+    tombstones.push(createTombstone(bookmark));
+    await saveLocalTombstones(tombstones);
+  }
+}
+
 //************************** NOTIFICATION ************************
 let previousTabId;
 let confirmationTabId = null;
@@ -386,7 +441,6 @@ async function displayConfirmationPage(
   action,
   localBookmarks,
   remoteBookmarks,
-  oldBookmarks = null,
   conflicts = [],
 ) {
   const { localChanges, remoteChanges } = changes;
@@ -398,7 +452,6 @@ async function displayConfirmationPage(
     action: action,
     localBookmarks: localBookmarks,
     remoteBookmarks: remoteBookmarks,
-    oldBookmarks: oldBookmarks,
     conflicts: conflicts,
   });
 
@@ -471,14 +524,89 @@ async function closeConfirmationWindow() {
     "action",
     "localBookmarks",
     "remoteBookmarks",
-    "oldBookmarks",
     "conflicts",
   ]);
   previousTabId = null;
 }
 
-//************************** MAIN LOGIC **************************
-// Function to get all bookmarks and store them in local storage
+//************************** SYNC LOGIC WITH TOMBSTONES **************************
+// Calculate changes between local and remote using tombstones
+function calcTombstoneChanges(localBookmarks, remoteData, localTombstones) {
+  const remoteBookmarks = getActiveBookmarks(remoteData);
+  const remoteTombstones = getTombstones(remoteData);
+
+  const localChanges = { insertions: [], deletions: [], updates: [] };
+  const remoteChanges = { insertions: [], deletions: [], updates: [] };
+  const conflicts = [];
+
+  // Build maps for quick lookup
+  const localMap = new Map();
+  localBookmarks.forEach((b) => localMap.set(bookmarkIdentityKey(b), b));
+
+  const remoteMap = new Map();
+  remoteBookmarks.forEach((b) => remoteMap.set(bookmarkIdentityKey(b), b));
+
+  const localTombstoneMap = new Map();
+  localTombstones.forEach((t) =>
+    localTombstoneMap.set(bookmarkIdentityKey(t), t),
+  );
+
+  const remoteTombstoneMap = new Map();
+  remoteTombstones.forEach((t) =>
+    remoteTombstoneMap.set(bookmarkIdentityKey(t), t),
+  );
+
+  // Process local bookmarks
+  for (const local of localBookmarks) {
+    const key = bookmarkIdentityKey(local);
+    const remote = remoteMap.get(key);
+    const remoteTombstone = remoteTombstoneMap.get(key);
+
+    if (remoteTombstone) {
+      // Remote deleted this bookmark - delete locally
+      localChanges.deletions.push(local);
+    } else if (remote) {
+      // Exists in both - check for updates (3-of-4 matching for attribute changes)
+      if (!bookmarksEqual(local, remote)) {
+        const changedAttr = findChangedAttribute(local, remote);
+        if (changedAttr) {
+          // Conflict: both have it but different - for now, treat as update from remote
+          // TODO: could add proper conflict detection here
+          localChanges.updates.push({
+            oldBookmark: local,
+            newBookmark: remote,
+            changedAttribute: changedAttr,
+          });
+        }
+      }
+    } else {
+      // Only in local, not in remote, no remote tombstone - push to remote
+      remoteChanges.insertions.push(local);
+    }
+  }
+
+  // Process remote bookmarks not in local
+  for (const remote of remoteBookmarks) {
+    const key = bookmarkIdentityKey(remote);
+    const local = localMap.get(key);
+    const localTombstone = localTombstoneMap.get(key);
+
+    if (!local) {
+      if (localTombstone) {
+        // Local deleted this bookmark - push tombstone to remote
+        remoteChanges.deletions.push(remote);
+      } else {
+        // Only in remote, not in local, no local tombstone - pull to local
+        localChanges.insertions.push(remote);
+      }
+    }
+    // If local exists, already handled above
+  }
+
+  return { localChanges, remoteChanges, conflicts };
+}
+
+// Main sync function
 async function syncAllBookmarks(
   url,
   username,
@@ -488,11 +616,11 @@ async function syncAllBookmarks(
 ) {
   const bookmarkTreeNodes = await browser.bookmarks.getTree();
   const localBookmarks = await retrieveLocalBookmarks(bookmarkTreeNodes);
-  let remoteBookmarks;
-  let oldBookmarks;
+  const localTombstones = await getLocalTombstones();
+
+  let remoteData;
   try {
-    remoteBookmarks = await fetchWebDAV(url, username, password, false);
-    oldBookmarks = await fetchWebDAV(url, username, password, true);
+    remoteData = await fetchWebDAV(url, username, password);
   } catch (error) {
     console.error(error);
     await browser.storage.local.set({
@@ -501,20 +629,13 @@ async function syncAllBookmarks(
     return;
   }
 
-  // If neither remote file exists, push local bookmarks to both and return
-  if (remoteBookmarks === null && oldBookmarks === null) {
-    await updateWebDAV(url, username, password, localBookmarks, false);
-    await updateWebDAV(url, username, password, localBookmarks, true);
+  // If remote doesn't exist, push local bookmarks (no tombstones needed initially)
+  if (remoteData === null) {
+    await updateWebDAV(url, username, password, localBookmarks);
     await browser.storage.local.set({
       message: `Initial sync: ${formatSyncTime()}`,
     });
     return;
-  }
-
-  // If only .old file is missing, create it from current remote
-  if (oldBookmarks === null && remoteBookmarks !== null) {
-    await updateWebDAV(url, username, password, remoteBookmarks, true);
-    oldBookmarks = remoteBookmarks;
   }
 
   // Store when last synced
@@ -522,26 +643,30 @@ async function syncAllBookmarks(
     message: `Last sync: ${formatSyncTime()}`,
   });
 
-  // Use three-way merge if oldBookmarks exists
-  const threeWayResult = calcThreeWayChanges(
+  // Calculate changes using tombstones
+  const { localChanges, remoteChanges, conflicts } = calcTombstoneChanges(
     localBookmarks,
-    remoteBookmarks ? remoteBookmarks : [],
-    oldBookmarks,
+    remoteData,
+    localTombstones,
   );
 
-  // Check if there are any changes or conflicts
+  // Check if there are any changes
   const hasChanges =
-    threeWayResult.pullFromRemote.length > 0 ||
-    threeWayResult.pushToRemote.length > 0 ||
-    threeWayResult.conflicts.length > 0;
+    localChanges.insertions.length > 0 ||
+    localChanges.deletions.length > 0 ||
+    localChanges.updates.length > 0 ||
+    remoteChanges.insertions.length > 0 ||
+    remoteChanges.deletions.length > 0 ||
+    remoteChanges.updates.length > 0 ||
+    conflicts.length > 0;
 
   if (!hasChanges) {
     return;
   }
 
-  // Helper function to show confirmation page with three-way data
+  // Helper function to show confirmation page
   const showConfirmation = async () => {
-    if (threeWayResult.conflicts.length > 0) {
+    if (conflicts.length > 0) {
       // Has conflicts - show conflict resolution UI
       await displayConfirmationPage(
         {
@@ -550,20 +675,15 @@ async function syncAllBookmarks(
         },
         "Conflict",
         localBookmarks,
-        remoteBookmarks ? remoteBookmarks : [],
-        oldBookmarks,
-        threeWayResult.conflicts,
+        remoteData,
+        conflicts,
       );
     } else {
-      // Show all changes (both directions)
-      const changes = convertThreeWayToChanges(threeWayResult);
-      console.log("three-way changes:", changes);
       await displayConfirmationPage(
-        changes,
+        { localChanges, remoteChanges },
         "Sync",
         localBookmarks,
-        remoteBookmarks ? remoteBookmarks : [],
-        oldBookmarks,
+        remoteData,
         [],
       );
     }
@@ -599,351 +719,6 @@ browser.notifications.onClicked.addListener(async (notificationId) => {
     }
   }
 });
-
-function filterCascadeChanges(updateIndexes) {
-  // Group by parent path (siblings)
-  const groups = new Map();
-  for (const update of updateIndexes) {
-    const pathKey = update.path.join("/");
-    if (!groups.has(pathKey)) groups.set(pathKey, []);
-    groups.get(pathKey).push(update);
-  }
-
-  const filtered = [];
-  for (const [pathKey, siblings] of groups) {
-    if (siblings.length <= 1) {
-      filtered.push(...siblings);
-      continue;
-    }
-
-    // Calculate deltas and find cascade pattern
-    const withDeltas = siblings.map((s) => ({
-      ...s,
-      delta: s.index - s.oldIndex,
-    }));
-
-    // Count +1 and -1 deltas
-    let plus1 = 0,
-      minus1 = 0;
-    for (const item of withDeltas) {
-      if (item.delta === 1) plus1++;
-      if (item.delta === -1) minus1++;
-    }
-
-    // Determine cascade delta (most common ±1 with at least 2 occurrences)
-    const cascadeDelta =
-      plus1 > minus1 && plus1 > 1
-        ? 1
-        : minus1 > plus1 && minus1 > 1
-          ? -1
-          : null;
-
-    // Keep items that don't match cascade pattern
-    for (const item of withDeltas) {
-      if (cascadeDelta === null || item.delta !== cascadeDelta) {
-        // Remove the delta property before returning
-        const { delta, ...bookmark } = item;
-        filtered.push(bookmark);
-      }
-    }
-
-    // Edge case: if we filtered everything, keep at least the largest move
-    if (filtered.length === 0 && withDeltas.length > 0) {
-      const largestMove = withDeltas.reduce((max, item) =>
-        Math.abs(item.delta) > Math.abs(max.delta) ? item : max,
-      );
-      const { delta, ...bookmark } = largestMove;
-      filtered.push(bookmark);
-    }
-  }
-
-  return filtered;
-}
-
-function calcBookmarkChanges(otherBookmarks, myBookmarks) {
-  const myBookmarksMap = new Map();
-  const otherBookmarksMap = new Map();
-
-  // Populate maps and check for duplicates in myBookmarks
-  const deletions = [];
-  myBookmarks.forEach((bookmark) => {
-    const key = bookmarkKey(bookmark, true);
-    if (myBookmarksMap.has(key)) {
-      deletions.push(bookmark);
-    } else {
-      myBookmarksMap.set(key, bookmark);
-    }
-  });
-
-  // Populate maps and check for duplicates in otherBookmarks
-  const insertions = [];
-  otherBookmarks.forEach((bookmark) => {
-    const key = bookmarkKey(bookmark, true);
-    if (otherBookmarksMap.has(key)) {
-      insertions.push(bookmark);
-    } else {
-      otherBookmarksMap.set(key, bookmark);
-    }
-  });
-
-  // Identify insertions: bookmarks in otherBookmarks not present in myBookmarks
-  otherBookmarksMap.forEach((bookmark, key) => {
-    if (!myBookmarksMap.has(key)) {
-      insertions.push(bookmark);
-    }
-  });
-
-  // Identify deletions: bookmarks in myBookmarks not present in otherBookmarks
-  myBookmarksMap.forEach((bookmark, key) => {
-    if (!otherBookmarksMap.has(key)) {
-      deletions.push(bookmark);
-    }
-  });
-
-  // Build maps for index-change detection (key WITHOUT index)
-  const updateIndexes = [];
-  const deletionsByKeyNoIndex = new Map();
-
-  deletions.forEach((bookmark) => {
-    const key = bookmarkKey(bookmark, false);
-    deletionsByKeyNoIndex.set(key, bookmark);
-  });
-
-  // Find matching entries with different indexes
-  for (let i = insertions.length - 1; i >= 0; i--) {
-    const insBookmark = insertions[i];
-    const key = bookmarkKey(insBookmark, false);
-
-    if (deletionsByKeyNoIndex.has(key)) {
-      const delBookmark = deletionsByKeyNoIndex.get(key);
-      updateIndexes.push({ ...insBookmark, oldIndex: delBookmark.index });
-      deletions.splice(deletions.indexOf(delBookmark), 1);
-      insertions.splice(i, 1);
-      deletionsByKeyNoIndex.delete(key);
-    }
-  }
-
-  // Filter cascade changes before returning
-  const filteredUpdateIndexes = filterCascadeChanges(updateIndexes);
-
-  return { insertions, deletions, updateIndexes: filteredUpdateIndexes };
-}
-
-// Compare two bookmarks for equality
-function bookmarksEqual(a, b) {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-
-  return (
-    a.title === b.title &&
-    (a.url || "") === (b.url || "") &&
-    a.index === b.index &&
-    arraysEqual(a.path || [], b.path || [])
-  );
-}
-
-// Three-way diff calculation
-function calcThreeWayChanges(localBookmarks, remoteBookmarks, oldBookmarks) {
-  // oldBookmarks should always exist now (auto-created if missing)
-  // Treat missing oldBookmarks as empty array for safety
-  const baseline = oldBookmarks || [];
-
-  const pullFromRemote = []; // Remote changed, local same as old
-  const pushToRemote = []; // Local changed, remote same as old
-  const conflicts = []; // Both changed differently
-
-  // Track which bookmarks we've processed
-  const processedOld = new Set();
-  const processedLocal = new Set();
-  const processedRemote = new Set();
-
-  // Process each bookmark in baseline
-  for (let i = 0; i < baseline.length; i++) {
-    const old = baseline[i];
-    processedOld.add(i);
-
-    // Find matching bookmarks using 3-of-4 matching
-    const localIdx = localBookmarks.findIndex(
-      (b, idx) => !processedLocal.has(idx) && matchBookmarks3of4(old, b),
-    );
-    const remoteIdx = remoteBookmarks.findIndex(
-      (b, idx) => !processedRemote.has(idx) && matchBookmarks3of4(old, b),
-    );
-
-    const local = localIdx >= 0 ? localBookmarks[localIdx] : null;
-    const remote = remoteIdx >= 0 ? remoteBookmarks[remoteIdx] : null;
-
-    if (localIdx >= 0) processedLocal.add(localIdx);
-    if (remoteIdx >= 0) processedRemote.add(remoteIdx);
-
-    const localChanged = !bookmarksEqual(local, old);
-    const remoteChanged = !bookmarksEqual(remote, old);
-
-    if (!localChanged && !remoteChanged) {
-      // No changes
-      continue;
-    }
-
-    if (!localChanged && remoteChanged) {
-      // Pull from remote
-      if (!remote) {
-        // Remote deleted
-        pullFromRemote.push({ type: "delete", bookmark: old });
-      } else {
-        // Remote modified
-        const changedAttr = findChangedAttribute(old, remote);
-        pullFromRemote.push({
-          type: "update",
-          bookmark: remote,
-          oldBookmark: old,
-          changedAttribute: changedAttr,
-        });
-      }
-    } else if (localChanged && !remoteChanged) {
-      // Push to remote
-      if (!local) {
-        // Local deleted
-        pushToRemote.push({ type: "delete", bookmark: old });
-      } else {
-        // Local modified
-        const changedAttr = findChangedAttribute(old, local);
-        pushToRemote.push({
-          type: "update",
-          bookmark: local,
-          oldBookmark: old,
-          changedAttribute: changedAttr,
-        });
-      }
-    } else {
-      // Both changed
-      if (bookmarksEqual(local, remote)) {
-        // Same change made on both sides - no action needed
-        continue;
-      }
-
-      // Check if they changed different attributes (can auto-merge)
-      const localAttr = findChangedAttribute(old, local);
-      const remoteAttr = findChangedAttribute(old, remote);
-
-      if (
-        local &&
-        remote &&
-        localAttr &&
-        remoteAttr &&
-        localAttr !== remoteAttr
-      ) {
-        // Different attributes changed - can merge!
-        // Pull remote change, push local change
-        pullFromRemote.push({
-          type: "update",
-          bookmark: remote,
-          oldBookmark: old,
-          changedAttribute: remoteAttr,
-        });
-        pushToRemote.push({
-          type: "update",
-          bookmark: local,
-          oldBookmark: old,
-          changedAttribute: localAttr,
-        });
-      } else {
-        // Same attribute changed differently, or one side deleted - Conflict!
-        conflicts.push({
-          local: local,
-          remote: remote,
-          old: old,
-          localAttribute: localAttr,
-          remoteAttribute: remoteAttr,
-        });
-      }
-    }
-  }
-
-  // Find new bookmarks in local (not in old)
-  for (let i = 0; i < localBookmarks.length; i++) {
-    if (processedLocal.has(i)) continue;
-    const local = localBookmarks[i];
-
-    // Check if remote also added the same bookmark
-    const remoteIdx = remoteBookmarks.findIndex(
-      (b, idx) => !processedRemote.has(idx) && matchBookmarks3of4(local, b),
-    );
-
-    if (remoteIdx >= 0) {
-      processedRemote.add(remoteIdx);
-      const remote = remoteBookmarks[remoteIdx];
-      if (bookmarksEqual(local, remote)) {
-        // Both added same bookmark - no action
-        continue;
-      } else {
-        // Both added similar bookmark with differences - conflict
-        conflicts.push({
-          local: local,
-          remote: remote,
-          old: null,
-          localAttribute: null,
-          remoteAttribute: null,
-        });
-      }
-    } else {
-      // Only local added - push to remote
-      pushToRemote.push({ type: "insert", bookmark: local });
-    }
-    processedLocal.add(i);
-  }
-
-  // Find new bookmarks in remote (not in old)
-  for (let i = 0; i < remoteBookmarks.length; i++) {
-    if (processedRemote.has(i)) continue;
-    // Only remote added - pull from remote
-    pullFromRemote.push({ type: "insert", bookmark: remoteBookmarks[i] });
-  }
-
-  return {
-    mode: "three-way",
-    pullFromRemote,
-    pushToRemote,
-    conflicts,
-  };
-}
-
-// Convert three-way result to changes format
-function convertThreeWayToChanges(threeWayResult) {
-  const localChanges = { insertions: [], deletions: [], updates: [] };
-  const remoteChanges = { insertions: [], deletions: [], updates: [] };
-
-  // Process changes to apply locally (from remote)
-  for (const change of threeWayResult.pullFromRemote) {
-    if (change.type === "insert") {
-      localChanges.insertions.push(change.bookmark);
-    } else if (change.type === "delete") {
-      localChanges.deletions.push(change.bookmark);
-    } else if (change.type === "update") {
-      localChanges.updates.push({
-        oldBookmark: change.oldBookmark,
-        newBookmark: change.bookmark,
-        changedAttribute: change.changedAttribute,
-      });
-    }
-  }
-
-  // Process changes to apply remotely (from local)
-  for (const change of threeWayResult.pushToRemote) {
-    if (change.type === "insert") {
-      remoteChanges.insertions.push(change.bookmark);
-    } else if (change.type === "delete") {
-      remoteChanges.deletions.push(change.bookmark);
-    } else if (change.type === "update") {
-      remoteChanges.updates.push({
-        oldBookmark: change.oldBookmark,
-        newBookmark: change.bookmark,
-        changedAttribute: change.changedAttribute,
-      });
-    }
-  }
-
-  return { localChanges, remoteChanges };
-}
 
 async function loadConfig() {
   const config = await browser.storage.sync.get([
@@ -1020,7 +795,31 @@ browser.bookmarks.onCreated.addListener(async () => {
 browser.bookmarks.onMoved.addListener(async () => {
   await debounceBookmarkSync(true);
 });
-browser.bookmarks.onRemoved.addListener(async () => {
+browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+  // Add tombstone for deleted bookmark
+  const bookmark = {
+    title: removeInfo.node.title,
+    url: removeInfo.node.url,
+    path: [], // We'll need to track the path - for now simplified
+  };
+  // Get parent path
+  if (removeInfo.parentId) {
+    try {
+      let currentId = removeInfo.parentId;
+      const path = [];
+      while (currentId) {
+        const [node] = await browser.bookmarks.get(currentId);
+        if (node.title) {
+          path.unshift(node.title);
+        }
+        currentId = node.parentId;
+      }
+      bookmark.path = path;
+    } catch (e) {
+      // Parent might not exist anymore
+    }
+  }
+  await addLocalTombstone(bookmark);
   await debounceBookmarkSync(true);
 });
 
@@ -1043,91 +842,103 @@ async function handleSync(config) {
     "remoteBookmarks",
   ]);
 
-  // Apply remote changes to local (localChanges = changes from remote to apply locally)
+  // Apply remote changes to local
   if (localChanges) {
     await modifyLocalBookmarks(localChanges.deletions, localChanges.insertions);
     await applyLocalUpdates(localChanges.updates || []);
   }
 
-  // Get final local state and push to remote (includes local changes)
+  // Get final local state
   const finalBookmarks = await getLocalBookmarksSnapshot();
 
-  // Update .old to previous remote state BEFORE updating .json
-  // This preserves the baseline for other machines that haven't synced yet
-  if (remoteBookmarks) {
-    await updateWebDAV(
-      config.url,
-      config.username,
-      config.password,
-      remoteBookmarks,
-      true,
-    );
+  // Get current remote tombstones and local tombstones
+  const remoteData = remoteBookmarks || [];
+  const remoteTombstones = getTombstones(remoteData);
+  const localTombstones = await getLocalTombstones();
+
+  // Merge tombstones (combine local and remote, cleanup old ones)
+  const allTombstones = [...remoteTombstones];
+  for (const lt of localTombstones) {
+    const exists = allTombstones.some((t) => matchesTombstone(lt, t));
+    if (!exists) {
+      allTombstones.push(lt);
+    }
   }
 
-  // Update .json to the new merged state
+  // Create new remote data: active bookmarks + tombstones
+  const newRemoteData = [...finalBookmarks, ...allTombstones];
+
+  // Update remote
   await updateWebDAV(
     config.url,
     config.username,
     config.password,
-    finalBookmarks,
-    false,
+    newRemoteData,
   );
+
+  // Save merged tombstones locally
+  await saveLocalTombstones(allTombstones);
 
   await closeConfirmationWindow();
 }
 
 async function handleConflictLocal(config) {
+  const localBookmarks = await getLocalBookmarksSnapshot();
+  const localTombstones = await getLocalTombstones();
+
+  // Push local state + tombstones to remote
+  const newRemoteData = [...localBookmarks, ...localTombstones];
+  await updateWebDAV(
+    config.url,
+    config.username,
+    config.password,
+    newRemoteData,
+  );
+
+  await closeConfirmationWindow();
+}
+
+async function handleConflictRemote(config) {
   const { remoteBookmarks } = await browser.storage.local.get([
     "remoteBookmarks",
   ]);
   const localBookmarks = await getLocalBookmarksSnapshot();
 
-  // Update .old to previous remote state before updating .json
-  if (remoteBookmarks) {
-    await updateWebDAV(
-      config.url,
-      config.username,
-      config.password,
-      remoteBookmarks,
-      true,
-    );
-  }
+  const remoteActive = getActiveBookmarks(remoteBookmarks || []);
+  const remoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Push local as the new state
-  await updateWebDAV(
-    config.url,
-    config.username,
-    config.password,
-    localBookmarks,
-    false,
-  );
-  await closeConfirmationWindow();
-}
+  // Build maps
+  const localMap = new Map();
+  localBookmarks.forEach((b) => localMap.set(bookmarkIdentityKey(b), b));
 
-async function handleConflictRemote(config) {
-  const { remoteBookmarks, localBookmarks } = await browser.storage.local.get([
-    "remoteBookmarks",
-    "localBookmarks",
-  ]);
+  const remoteMap = new Map();
+  remoteActive.forEach((b) => remoteMap.set(bookmarkIdentityKey(b), b));
 
-  const changes = calcBookmarkChanges(remoteBookmarks, localBookmarks);
-  await modifyLocalBookmarks(changes.deletions, changes.insertions);
+  // Calculate what to delete and insert locally
+  const toDelete = [];
+  const toInsert = [];
 
-  // Apply index updates
-  for (const update of changes.updateIndexes) {
-    const id = await locateBookmarkId(
-      update.url,
-      update.title,
-      update.oldIndex,
-      update.path,
-    );
-    if (id) {
-      await browser.bookmarks.move(id, { index: update.index });
+  // Delete local bookmarks not in remote
+  for (const local of localBookmarks) {
+    const key = bookmarkIdentityKey(local);
+    if (!remoteMap.has(key)) {
+      toDelete.push(local);
     }
   }
 
-  // For conflict-remote, we accept remote as-is, so .old becomes the previous remote
-  // and .json stays as remote (no change needed to .json)
+  // Insert remote bookmarks not in local
+  for (const remote of remoteActive) {
+    const key = bookmarkIdentityKey(remote);
+    if (!localMap.has(key)) {
+      toInsert.push(remote);
+    }
+  }
+
+  await modifyLocalBookmarks(toDelete, toInsert);
+
+  // Clear local tombstones (we accepted remote)
+  await saveLocalTombstones(remoteTombstones);
+
   await closeConfirmationWindow();
 }
 
@@ -1170,10 +981,13 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 
 // Export for mocha tests
 ({
-  calcBookmarkChanges,
-  filterCascadeChanges,
-  calcThreeWayChanges,
+  calcTombstoneChanges,
   bookmarksEqual,
   matchBookmarks3of4,
   findChangedAttribute,
+  createTombstone,
+  matchesTombstone,
+  getActiveBookmarks,
+  getTombstones,
+  bookmarkIdentityKey,
 });

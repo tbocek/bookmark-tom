@@ -39,6 +39,25 @@
         </div>
         <div id="status" class="success"></div>
         <div id="error" class="error"></div>
+
+        <h2>Tombstones</h2>
+        <p>
+            Tombstones track deleted bookmarks to sync deletions across devices.
+            <span id="tombstone-count">Loading...</span>
+        </p>
+        <div class="container">
+            <label for="tombstone-age">Clear tombstones older than:</label>
+            <select id="tombstone-age">
+                <option value="0">All (now)</option>
+                <option value="7">1 week</option>
+                <option value="30" selected>1 month</option>
+                <option value="365">1 year</option>
+            </select>
+            <button id="clear-tombstones-button">
+                <span class="button-text">Clear Tombstones</span>
+            </button>
+        </div>
+
         <p>
             The source code is available on
             <a href="https://github.com/tbocek/bookmark-tom">GitHub</a>.

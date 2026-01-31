@@ -32,6 +32,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const spinner = document.getElementById("spinner");
   const saveConfigButton = document.getElementById("save-config-button");
   const loadConfigButton = document.getElementById("load-config-button");
+  const tombstoneCountSpan = document.getElementById("tombstone-count");
+  const tombstoneAgeSelect = document.getElementById("tombstone-age");
+  const clearTombstonesButton = document.getElementById(
+    "clear-tombstones-button",
+  );
 
   // Load existing config
   browser.storage.sync
@@ -47,6 +52,16 @@ document.addEventListener("DOMContentLoaded", () => {
       passwordInput.value = config.webdavPassword || "";
       checkIntervalMinutesInput.value = config.checkIntervalMinutes || "";
     });
+
+  // Load and display tombstone count
+  async function updateTombstoneCount() {
+    const storage = await browser.storage.local.get(["tombstones"]);
+    const tombstones = storage.tombstones || [];
+    const count = tombstones.length;
+    tombstoneCountSpan.textContent = `(${count} tombstone${count !== 1 ? "s" : ""})`;
+  }
+
+  updateTombstoneCount();
 
   saveButton.addEventListener("click", () => {
     storeConfiguration();
@@ -140,5 +155,27 @@ document.addEventListener("DOMContentLoaded", () => {
       reader.readAsText(file);
     };
     input.click();
+  });
+
+  clearTombstonesButton.addEventListener("click", async () => {
+    const maxAgeDays = parseInt(tombstoneAgeSelect.value, 10);
+    const storage = await browser.storage.local.get(["tombstones"]);
+    const tombstones = storage.tombstones || [];
+
+    let remaining;
+    if (maxAgeDays === 0) {
+      // Clear all
+      remaining = [];
+    } else {
+      // Clear older than X days
+      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      remaining = tombstones.filter((t) => now - t.deletedAt < maxAgeMs);
+    }
+
+    const cleared = tombstones.length - remaining.length;
+    await browser.storage.local.set({ tombstones: remaining });
+    await updateTombstoneCount();
+    statusDiv.innerText = `Cleared ${cleared} tombstone${cleared !== 1 ? "s" : ""}.`;
   });
 });
