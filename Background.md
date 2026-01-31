@@ -31,3 +31,65 @@ Generative AI is a powerful tool that can significantly enhance productivity in 
 Will GenAI replace developers? I don’t think so. Instead, I believe it will have the opposite effect. As code generation becomes faster and easier, more developers will be needed to manage and maintain the increased volume of code. GenAI tools help with writing boilerplate code and handling routine tasks, but they are not yet advanced enough to handle more complex problems without oversight. However, it will change the way we work, making it essential to adapt and integrate these tools into your workflows.
 
 (09.08.2024, Thomas Bocek)
+
+---
+
+## Update: Upgrading from 2-Way to 3-Way Sync with Claude Code / Opus 4.5 (January 2026)
+
+After using bookmark-tom for over a year, I encountered sync issues when using 3+ machines. The original 2-way sync algorithm couldn't reliably detect what changed where, leading to false conflicts. This turned into an intense debugging session that revealed both the power and frustrations of working with AI coding assistants.
+
+### Why Now?
+
+I knew about the quirks in my extension - the sync issues with 3+ machines, the edge cases to avoid. For my own use, I could work around them. But then I received a review on the Firefox Add-ons page: "Funktioniert ausgezeichnet. Hat meine Probleme gelöst." (Works excellently. Solved my problems.) This changed my perspective. It wasn't just a personal tool anymore - someone else was using it, and they would run into the same papercuts I had learned to avoid. This, combined with the opportunity to learn and tinker with Claude Code / Opus 4.5, motivated me to fix the sync properly.
+
+### The Problem
+
+The original sync compared local bookmarks directly with remote bookmarks. This works fine for 2 machines, but with 3+ machines, you can't tell:
+- Did Machine A add a bookmark, or did Machine B delete it?
+- Is this a conflict, or did one machine just not sync yet?
+
+The solution was to implement a 3-way sync with a baseline state (`oldRemoteState`), tombstones for tracking deletions, and proper change detection using "3-of-4" attribute matching (title, url, path, index).
+
+### The Journey with Claude Code
+
+**Starting with a plan** - I asked Claude to explore the codebase and create an implementation plan. It produced a detailed plan covering the 3-state sync algorithm, tombstone handling, and conflict detection. The plan seemed solid.
+
+**I had to start twice** - The first attempt failed. I started by asking Claude to modify the existing 2-way sync code incrementally. The typical pattern was: I'd report what to change, and Claude would add a filter here, an exception there, growing the code with patches. But this approach never addressed the fundamental issue - the 2-way algorithm simply couldn't work for 3+ machines. The real solution required stepping back, understanding the core problem, and rewriting with a proper 3-way algorithm. Incremental fixes on a flawed foundation just created more complexity. But Claude and AI tools in general happily comply when asked and add more and more.
+
+**Then things got frustrating:**
+
+1. **Random edits without understanding** - At one point, Claude started modifying code without fully understanding the issue. I had to explicitly say "STOP CHANGING RANDOM CODE WITHOUT KNOWING THE ISSUE." The AI would sometimes jump to fixing symptoms rather than diagnosing the root cause.
+
+2. **Forgetting the plan** - Despite creating a detailed plan, Claude would sometimes implement things differently or forget key parts. The plan called for local change tracking, but this wasn't implemented until I noticed tests were failing.
+
+3. **Context loss** - The conversation ran long and the context compaction kicked in, losing earlier details. We had to work from summaries rather than the full conversation history.
+
+### What Worked Well
+
+- **Test-driven fixes** - Adding test cases for each edge case (ended up with 39 tests) prevented regressions
+- **Explicit instructions** - Being very specific: "analyze first, give options, and ask before fixing" worked better than letting Claude autonomously modify code
+
+### Lessons Learned
+
+1. **Don't let AI run autonomously on complex debugging** - It will chase symptoms.
+
+2. **Context limits matter** - Long debugging sessions hit context limits. Consider breaking work into smaller sessions.
+
+3. **Check that the plan is actually implemented** - Don't assume. Verify that key features from the plan made it into the code.
+
+4. **Guide architectural decisions** - The AI won't make design choices for you. For example: should the sync algorithm output insert/delete in the core and let the view transform these into insert/delete/update for display (making the view more complex)? Or should the core output insert/delete/update directly and pass this to the view? The AI will implement whatever you ask, even if it's the wrong approach.
+
+### The Result
+
+After several hours of iterative debugging (and cursing), the sync now works reliably with 3+ machines:
+- Proper 3-way merge with baseline tracking
+- Tombstones for deletion propagation
+- 3-of-4 matching for conflict detection
+- Clean UI with grouped position changes
+- 39 test cases covering multi-machine scenarios
+
+### Final Thoughts
+
+Using AI for this task was faster than doing it alone, but required constant supervision. The AI excels at generating code structure and boilerplate, but debugging issues and understanding the concepts still requires human insight. The key is treating AI as a powerful tool that needs guidance, not an autonomous developer.
+
+(31.01.2026, Thomas Bocek)
