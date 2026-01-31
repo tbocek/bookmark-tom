@@ -876,6 +876,7 @@ function calcTombstoneChanges(
   remoteData,
   localTombstones,
   changeLog = [],
+  lastSyncedState = null,
 ) {
   const remoteBookmarks = getActiveBookmarks(remoteData);
   const remoteTombstones = getTombstones(remoteData);
@@ -913,6 +914,13 @@ function calcTombstoneChanges(
     if (tombstone.url) continue; // Only check folder tombstones
 
     const folderPath = [...tombstone.path, tombstone.title];
+
+    // Skip if this folder is inside an already-conflicted parent folder
+    const isInsideConflictedFolder = Array.from(folderConflicts).some(
+      (conflictPath) => folderPath.join("/").startsWith(conflictPath + "/"),
+    );
+    if (isInsideConflictedFolder) continue;
+
     const localContentInFolder = localBookmarks.filter((bm) => {
       if (bm.path.length >= folderPath.length) {
         return folderPath.every((segment, i) => bm.path[i] === segment);
@@ -940,11 +948,28 @@ function calcTombstoneChanges(
     }
   }
 
+  // Track folder paths that are being deleted (to skip nested subfolders)
+  const folderDeletions = new Set();
+
   // Phase 0b: Local deleted folder, remote has content in it (reverse scenario)
   for (const tombstone of localTombstones) {
     if (tombstone.url) continue; // Only check folder tombstones
 
     const folderPath = [...tombstone.path, tombstone.title];
+    const folderPathStr = folderPath.join("/");
+
+    // Skip if this folder is inside an already-conflicted parent folder
+    const isInsideConflictedFolder = Array.from(folderConflicts).some(
+      (conflictPath) => folderPathStr.startsWith(conflictPath + "/"),
+    );
+    if (isInsideConflictedFolder) continue;
+
+    // Skip if this folder is inside an already-deleted parent folder
+    const isInsideDeletedFolder = Array.from(folderDeletions).some(
+      (deletedPath) => folderPathStr.startsWith(deletedPath + "/"),
+    );
+    if (isInsideDeletedFolder) continue;
+
     const remoteContentInFolder = remoteBookmarks.filter((bm) => {
       if (bm.path.length >= folderPath.length) {
         return folderPath.every((segment, i) => bm.path[i] === segment);
@@ -953,6 +978,55 @@ function calcTombstoneChanges(
     });
 
     if (remoteContentInFolder.length > 0) {
+      // Check if remote actually changed since last sync using lastSyncedState
+      // If remote content is the same as lastSyncedState, this is just a local delete → push to remote
+      if (lastSyncedState) {
+        const lastSyncContentInFolder = lastSyncedState.filter((bm) => {
+          if (bm.path && bm.path.length >= folderPath.length) {
+            return folderPath.every((segment, i) => bm.path[i] === segment);
+          }
+          return false;
+        });
+
+        // Check if remote content matches lastSyncedState (no remote changes)
+        const remoteUnchanged = remoteContentInFolder.every((remoteBm) => {
+          return lastSyncContentInFolder.some(
+            (lastBm) =>
+              lastBm.title === remoteBm.title &&
+              lastBm.url === remoteBm.url &&
+              arraysEqual(lastBm.path, remoteBm.path),
+          );
+        });
+
+        if (
+          remoteUnchanged &&
+          remoteContentInFolder.length === lastSyncContentInFolder.length
+        ) {
+          // Remote didn't change, this is purely a local deletion → push to remote
+          // Mark this folder as being deleted (to skip nested subfolders)
+          folderDeletions.add(folderPathStr);
+
+          // Mark remote content for deletion, not as conflict
+          for (const bm of remoteContentInFolder) {
+            remoteChanges.deletions.push(bm);
+            matchedRemoteKeys.add(bookmarkIdentityKey(bm));
+          }
+          // Also delete the folder itself from remote
+          const remoteFolder = remoteBookmarks.find(
+            (bm) =>
+              !bm.url &&
+              bm.title === tombstone.title &&
+              arraysEqual(bm.path, tombstone.path),
+          );
+          if (remoteFolder) {
+            remoteChanges.deletions.push(remoteFolder);
+            matchedRemoteKeys.add(bookmarkIdentityKey(remoteFolder));
+          }
+          continue; // Skip conflict, handled as deletion
+        }
+      }
+
+      // Remote changed since last sync → real conflict
       conflicts.push({
         type: "folder_deleted_local",
         folder: tombstone,
@@ -996,6 +1070,14 @@ function calcTombstoneChanges(
           continue; // Skip - handled as folder conflict
         }
       }
+      // Check if this item is inside a conflicted folder (skip deletion if so)
+      const isInsideConflictedFolder = Array.from(folderConflicts).some(
+        (conflictPath) => local.path.join("/").startsWith(conflictPath),
+      );
+      if (isInsideConflictedFolder) {
+        matchedLocalKeys.add(key);
+        continue; // Skip - parent folder conflict will handle this
+      }
       // Remote deleted this bookmark - delete locally
       localChanges.deletions.push(local);
       matchedLocalKeys.add(key);
@@ -1031,14 +1113,33 @@ function calcTombstoneChanges(
     const key = bookmarkIdentityKey(local);
     const remoteTombstone = remoteTombstoneMap.get(key);
     if (remoteTombstone) {
+      // Skip if inside a conflicted folder
+      const isInsideConflictedFolder = Array.from(folderConflicts).some(
+        (conflictPath) => local.path.join("/").startsWith(conflictPath),
+      );
+      if (isInsideConflictedFolder) {
+        matchedLocalKeys.add(key);
+        continue;
+      }
       localChanges.deletions.push(local);
       matchedLocalKeys.add(key);
     }
   }
 
   // Then, handle tombstone matches for unmatched remote bookmarks
+  const rootFolderNames = [
+    "Bookmarks Toolbar",
+    "Other Bookmarks",
+    "Mobile Bookmarks",
+    "Bookmarks Menu",
+  ];
   for (const remote of unmatchedRemote) {
     const key = bookmarkIdentityKey(remote);
+    // Skip if already matched (e.g., handled in Phase 0b folder deletion)
+    if (matchedRemoteKeys.has(key)) continue;
+    // Skip root folders
+    if (remote.path.length === 0 && rootFolderNames.includes(remote.title))
+      continue;
     const localTombstone = localTombstoneMap.get(key);
     if (localTombstone) {
       remoteChanges.deletions.push(remote);
@@ -1183,12 +1284,17 @@ async function syncAllBookmarks(
   // Get change log for conflict detection
   const changeLog = await getChangeLog();
 
+  // Get lastSyncedState for 3-way diff
+  const storage = await browser.storage.local.get(["lastSyncedState"]);
+  const lastSyncedState = storage.lastSyncedState || null;
+
   // Calculate changes using tombstones and change log
   const { localChanges, remoteChanges, conflicts } = calcTombstoneChanges(
     localBookmarks,
     remoteData,
     localTombstones,
     changeLog,
+    lastSyncedState,
   );
 
   // Check if there are any changes
@@ -1341,6 +1447,19 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
   const parentPath = await getBookmarkPath(removeInfo.parentId);
   const node = removeInfo.node;
 
+  // Don't create tombstones for root-level folders (Bookmarks Toolbar, Other Bookmarks, etc.)
+  const rootFolders = [
+    "Bookmarks Toolbar",
+    "Other Bookmarks",
+    "Mobile Bookmarks",
+    "Bookmarks Menu",
+  ];
+  if (parentPath.length === 0 && rootFolders.includes(node.title)) {
+    console.log(`Skipping tombstone for root folder: ${node.title}`);
+    await debounceBookmarkSync(true);
+    return;
+  }
+
   // Create tombstone for the removed node itself
   const bookmark = {
     title: node.title,
@@ -1362,6 +1481,13 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
           (segment, i) => bmData.path[i] === segment,
         );
         if (pathMatches) {
+          // Skip root folders that shouldn't have tombstones
+          if (bmData.path.length === 0 && rootFolders.includes(bmData.title)) {
+            console.log(
+              `Skipping tombstone for root folder in map: ${bmData.title}`,
+            );
+            continue;
+          }
           await addLocalTombstone({
             title: bmData.title,
             url: bmData.url,
