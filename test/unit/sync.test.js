@@ -1319,6 +1319,215 @@ describe("3-State Sync Algorithm", () => {
       expect(result.localChanges.insertions.some((i) => i.title === "d")).to.be
         .true;
     });
+
+    it("Case 36: B deletes empty F, A moves c into F -> NOT conflict, c moved into F locally", () => {
+      // Initial: F (empty folder), c at root
+      // B deletes F, syncs -> remote has F tombstone
+      // A moves c into F, syncs -> remote has c inside F
+      // B syncs -> NOT a conflict, c gets moved into F locally, F recreated
+
+      const oldRemoteState = [
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "c", url: "http://c/", path: ["Toolbar"], index: 1 },
+      ];
+      const currentLocalState = [
+        // B deleted F
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        // c still at root
+        { title: "c", url: "http://c/", path: ["Toolbar"], index: 1 },
+      ];
+      const currentRemoteState = [
+        // A kept F and moved c into it
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      const folderConflicts = detectFolderConflicts(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No conflict - A moved c into F, B should accept the move
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // c should be inserted at new path (inside F)
+      expect(
+        result.localChanges.insertions.some(
+          (i) => i.title === "c" && i.path.join("/") === "Toolbar/F",
+        ),
+      ).to.be.true;
+      // c should be deleted at old path (root)
+      expect(
+        result.localChanges.deletions.some(
+          (d) => d.title === "c" && d.path.join("/") === "Toolbar",
+        ),
+      ).to.be.true;
+    });
+
+    it("Case 37: F and c both created/removed/created, B deletes F, A moves c into F -> NOT conflict (tombstone test)", () => {
+      // Both F and c went through create/remove/create cycle (tombstones exist)
+      // Initial: F (empty folder), c at root, old tombstones for both F and c
+      // B deletes F, syncs -> remote has F tombstone
+      // A moves c into F, syncs -> remote has c inside F
+      // B syncs -> NOT a conflict, c gets moved into F locally
+
+      const oldRemoteState = [
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "c", url: "http://c/", path: ["Toolbar"], index: 1 },
+        // Old tombstone for F from previous delete
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now() - 100000,
+        },
+        // Old tombstone for c from previous delete
+        {
+          title: "c",
+          url: "http://c/",
+          path: ["Toolbar"],
+          index: 1,
+          deleted: true,
+          deletedAt: Date.now() - 100000,
+        },
+      ];
+      const currentLocalState = [
+        // B deleted F (fresh tombstone)
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        // c still at root
+        { title: "c", url: "http://c/", path: ["Toolbar"], index: 1 },
+        // Old tombstone for F
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now() - 100000,
+        },
+        // Old tombstone for c
+        {
+          title: "c",
+          url: "http://c/",
+          path: ["Toolbar"],
+          index: 1,
+          deleted: true,
+          deletedAt: Date.now() - 100000,
+        },
+      ];
+      const currentRemoteState = [
+        // A kept F and moved c into it
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      const folderConflicts = detectFolderConflicts(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No conflict - A moved c into F, B should accept the move
+      expect(folderConflicts).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+
+      // c should be inserted at new path (inside F)
+      expect(
+        result.localChanges.insertions.some(
+          (i) => i.title === "c" && i.path.join("/") === "Toolbar/F",
+        ),
+      ).to.be.true;
+      // c should be deleted at old path (root)
+      expect(
+        result.localChanges.deletions.some(
+          (d) => d.title === "c" && d.path.join("/") === "Toolbar",
+        ),
+      ).to.be.true;
+    });
+
+    it("Case 38: A moves d into F, B deletes F (d index shifts) -> NOT conflict, d stays in F", () => {
+      // Initial: F with c inside, d at root
+      // A moves d into F, syncs
+      // B deletes F (and c), syncs -> d index shifts as side effect
+      // A syncs -> NOT a conflict
+      // Result: d stays in F (A's move wins), F survives, c deleted
+
+      const oldRemoteState = [
+        { title: "F", path: ["Toolbar"], index: 10 },
+        { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+        { title: "d", url: "http://d/", path: ["Toolbar"], index: 11 },
+      ];
+      const currentLocalState = [
+        // A moved d into F
+        { title: "F", path: ["Toolbar"], index: 10 },
+        { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+        { title: "d", url: "http://d/", path: ["Toolbar", "F"], index: 1 },
+      ];
+      const currentRemoteState = [
+        // B deleted F and c, d shifted to index 10
+        { title: "d", url: "http://d/", path: ["Toolbar"], index: 10 },
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 10,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+        {
+          title: "c",
+          url: "http://c/",
+          path: ["Toolbar", "F"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No conflict - A moved d into F, this is new content, F survives
+      expect(result.conflicts).to.be.empty;
+
+      // d should be pushed to remote inside F
+      expect(
+        result.remoteChanges.insertions.some(
+          (i) => i.title === "d" && i.path.join("/") === "Toolbar/F",
+        ),
+      ).to.be.true;
+      // c should be deleted locally (B deleted it)
+      expect(result.localChanges.deletions.some((d) => d.title === "c")).to.be
+        .true;
+    });
   });
 
   // ============================================

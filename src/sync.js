@@ -288,17 +288,22 @@ function mergeStates(oldState, localState, remoteState) {
       bookmarksEqual(d.old, old),
     );
 
-    // Case: Local deleted, remote modified → conflict
+    // Case: Local deleted, remote modified → conflict (unless only index changed)
     if (localDeleted && remoteModified) {
-      conflicts.push({
-        type: "delete_vs_edit",
-        bookmark: old,
-        localAction: "deleted",
-        remoteAction: "modified",
-        remoteVersion: remoteModified.current,
-      });
-      conflictedOldKeys.add(oldKey);
-      continue;
+      const remoteDiff = findDifferingAttribute(old, remoteModified.current);
+      // Index-only change is a side effect, not an intentional edit
+      // No conflict - deletion wins
+      if (remoteDiff !== "index") {
+        conflicts.push({
+          type: "delete_vs_edit",
+          bookmark: old,
+          localAction: "deleted",
+          remoteAction: "modified",
+          remoteVersion: remoteModified.current,
+        });
+        conflictedOldKeys.add(oldKey);
+        continue;
+      }
     }
 
     // Case: Local modified, remote deleted → conflict (unless only index changed)
