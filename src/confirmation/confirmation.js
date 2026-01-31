@@ -412,6 +412,8 @@ document.addEventListener("DOMContentLoaded", async function () {
   // remote = from local to remote (machine2cloud)
   const insertionsLocal = localChanges?.insertions || [];
   const insertionsRemote = remoteChanges?.insertions || [];
+
+  console.log("After grouping - insertionsRemote:", insertionsRemote);
   const deletionsLocal = localChanges?.deletions || [];
   const deletionsRemote = remoteChanges?.deletions || [];
   const updatesLocal = localChanges?.updates || [];
