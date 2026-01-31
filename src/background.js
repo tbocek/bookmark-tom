@@ -299,30 +299,46 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
   }
 }
 
-async function applyLocalBookmarkUpdates(upBookmarksIndexes) {
+async function applyLocalUpdates(updates) {
   try {
-    // Sort updates by path length to handle parent folders first
-    const sortedUpdates = [...upBookmarksIndexes].sort(
-      (a, b) => a.path.length - b.path.length,
-    );
+    for (const update of updates) {
+      const { oldBookmark, newBookmark, changedAttribute } = update;
 
-    for (const bookmark of sortedUpdates) {
+      // Find the bookmark using old values
       const id = await locateBookmarkId(
-        bookmark.url,
-        bookmark.title,
-        bookmark.oldIndex,
-        bookmark.path,
+        oldBookmark.url,
+        oldBookmark.title,
+        oldBookmark.index,
+        oldBookmark.path,
       );
 
-      if (id) {
-        const index =
-          bookmark.index === -1 ? bookmark.oldIndex : bookmark.index;
+      if (!id) {
+        console.warn("Could not find bookmark to update:", oldBookmark);
+        continue;
+      }
 
-        await browser.bookmarks.move(id, { index });
+      if (changedAttribute === "title" || changedAttribute === "url") {
+        // Update title or URL
+        await browser.bookmarks.update(id, {
+          title: newBookmark.title,
+          url: newBookmark.url,
+        });
+      } else if (changedAttribute === "index") {
+        // Move to new index (same parent)
+        await browser.bookmarks.move(id, { index: newBookmark.index });
+      } else if (changedAttribute === "path") {
+        // Move to new parent folder
+        const newParentId = await locateParentId(newBookmark.path);
+        if (newParentId) {
+          await browser.bookmarks.move(id, {
+            parentId: newParentId,
+            index: newBookmark.index,
+          });
+        }
       }
     }
   } catch (error) {
-    console.error("Error updating bookmark indexes:", error);
+    console.error("Error applying updates:", error);
     throw error;
   }
 }
@@ -893,8 +909,8 @@ function calcThreeWayChanges(localBookmarks, remoteBookmarks, oldBookmarks) {
 
 // Convert three-way result to changes format
 function convertThreeWayToChanges(threeWayResult) {
-  const localChanges = { insertions: [], deletions: [], updateIndexes: [] };
-  const remoteChanges = { insertions: [], deletions: [], updateIndexes: [] };
+  const localChanges = { insertions: [], deletions: [], updates: [] };
+  const remoteChanges = { insertions: [], deletions: [], updates: [] };
 
   // Process changes to apply locally (from remote)
   for (const change of threeWayResult.pullFromRemote) {
@@ -903,20 +919,11 @@ function convertThreeWayToChanges(threeWayResult) {
     } else if (change.type === "delete") {
       localChanges.deletions.push(change.bookmark);
     } else if (change.type === "update") {
-      const isIndexOnly =
-        change.bookmark.title === change.oldBookmark.title &&
-        (change.bookmark.url || "") === (change.oldBookmark.url || "") &&
-        arraysEqual(change.bookmark.path || [], change.oldBookmark.path || []);
-
-      if (isIndexOnly) {
-        localChanges.updateIndexes.push({
-          ...change.bookmark,
-          oldIndex: change.oldBookmark.index,
-        });
-      } else {
-        localChanges.deletions.push(change.oldBookmark);
-        localChanges.insertions.push(change.bookmark);
-      }
+      localChanges.updates.push({
+        oldBookmark: change.oldBookmark,
+        newBookmark: change.bookmark,
+        changedAttribute: change.changedAttribute,
+      });
     }
   }
 
@@ -927,20 +934,11 @@ function convertThreeWayToChanges(threeWayResult) {
     } else if (change.type === "delete") {
       remoteChanges.deletions.push(change.bookmark);
     } else if (change.type === "update") {
-      const isIndexOnly =
-        change.bookmark.title === change.oldBookmark.title &&
-        (change.bookmark.url || "") === (change.oldBookmark.url || "") &&
-        arraysEqual(change.bookmark.path || [], change.oldBookmark.path || []);
-
-      if (isIndexOnly) {
-        remoteChanges.updateIndexes.push({
-          ...change.bookmark,
-          oldIndex: change.oldBookmark.index,
-        });
-      } else {
-        remoteChanges.deletions.push(change.oldBookmark);
-        remoteChanges.insertions.push(change.bookmark);
-      }
+      remoteChanges.updates.push({
+        oldBookmark: change.oldBookmark,
+        newBookmark: change.bookmark,
+        changedAttribute: change.changedAttribute,
+      });
     }
   }
 
@@ -1048,7 +1046,7 @@ async function handleSync(config) {
   // Apply remote changes to local (localChanges = changes from remote to apply locally)
   if (localChanges) {
     await modifyLocalBookmarks(localChanges.deletions, localChanges.insertions);
-    await applyLocalBookmarkUpdates(localChanges.updateIndexes);
+    await applyLocalUpdates(localChanges.updates || []);
   }
 
   // Get final local state and push to remote (includes local changes)

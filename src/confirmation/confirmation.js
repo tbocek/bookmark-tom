@@ -9,7 +9,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   const insertionsDiv = document.getElementById("insertions");
   const deletionsDiv = document.getElementById("deletions");
-  const reordersDiv = document.getElementById("reorders");
+  const updatesDiv = document.getElementById("updates");
   const conflictsDiv = document.getElementById("conflicts");
   const directionImg = document.getElementById("direction");
   const normalButtons = document.getElementById("normal-buttons");
@@ -84,12 +84,27 @@ document.addEventListener("DOMContentLoaded", async function () {
     return createBookmarkListItem(bookmark);
   }
 
-  function createReorderListItem(bookmark) {
-    const indexSpan = document.createElement("span");
-    indexSpan.classList.add("index-change");
-    indexSpan.textContent = ` (position: ${bookmark.oldIndex} → ${bookmark.index})`;
+  function createUpdateListItem(update) {
+    const changeSpan = document.createElement("span");
+    changeSpan.classList.add("change-info");
 
-    return createBookmarkListItem(bookmark, { afterTitle: indexSpan });
+    const attr = update.changedAttribute;
+    const oldVal = update.oldBookmark[attr];
+    const newVal = update.newBookmark[attr];
+
+    let changeText;
+    if (attr === "path") {
+      changeText = ` (${attr}: ${oldVal.join(" > ")} → ${newVal.join(" > ")})`;
+    } else if (attr === "index") {
+      changeText = ` (position: ${oldVal} → ${newVal})`;
+    } else {
+      changeText = ` (${attr}: ${oldVal} → ${newVal})`;
+    }
+    changeSpan.textContent = changeText;
+
+    return createBookmarkListItem(update.newBookmark, {
+      afterTitle: changeSpan,
+    });
   }
 
   function createConflictListItem(conflict) {
@@ -178,13 +193,13 @@ document.addEventListener("DOMContentLoaded", async function () {
       direction: "remote",
     })),
   ];
-  const allReorders = [
-    ...(localChanges?.updateIndexes || []).map((b) => ({
-      ...b,
+  const allUpdates = [
+    ...(localChanges?.updates || []).map((u) => ({
+      ...u,
       direction: "local",
     })),
-    ...(remoteChanges?.updateIndexes || []).map((b) => ({
-      ...b,
+    ...(remoteChanges?.updates || []).map((u) => ({
+      ...u,
       direction: "remote",
     })),
   ];
@@ -198,13 +213,29 @@ document.addEventListener("DOMContentLoaded", async function () {
     return createBookmarkListItem(bookmark, { afterTitle: span });
   }
 
-  function createDirectionalReorderItem(bookmark) {
-    const indexSpan = document.createElement("span");
-    indexSpan.classList.add("index-change");
+  function createDirectionalUpdateItem(update) {
+    const changeSpan = document.createElement("span");
+    changeSpan.classList.add("change-info");
+
+    const attr = update.changedAttribute;
+    const oldVal = update.oldBookmark[attr];
+    const newVal = update.newBookmark[attr];
     const directionLabel =
-      bookmark.direction === "local" ? " (from remote)" : " (to remote)";
-    indexSpan.textContent = ` (position: ${bookmark.oldIndex} → ${bookmark.index})${directionLabel}`;
-    return createBookmarkListItem(bookmark, { afterTitle: indexSpan });
+      update.direction === "local" ? " (from remote)" : " (to remote)";
+
+    let changeText;
+    if (attr === "path") {
+      changeText = ` (${attr}: ${oldVal.join(" > ")} → ${newVal.join(" > ")})${directionLabel}`;
+    } else if (attr === "index") {
+      changeText = ` (position: ${oldVal} → ${newVal})${directionLabel}`;
+    } else {
+      changeText = ` (${attr}: ${oldVal} → ${newVal})${directionLabel}`;
+    }
+    changeSpan.textContent = changeText;
+
+    return createBookmarkListItem(update.newBookmark, {
+      afterTitle: changeSpan,
+    });
   }
 
   if (allInsertions.length > 0) {
@@ -223,12 +254,12 @@ document.addEventListener("DOMContentLoaded", async function () {
     deletionsDiv.remove();
   }
 
-  if (allReorders.length > 0) {
-    reordersDiv.appendChild(
-      createSection("Reordered:", allReorders, createDirectionalReorderItem),
+  if (allUpdates.length > 0) {
+    updatesDiv.appendChild(
+      createSection("Updated:", allUpdates, createDirectionalUpdateItem),
     );
   } else {
-    reordersDiv.remove();
+    updatesDiv.remove();
   }
 
   if (conflicts && conflicts.length > 0) {
