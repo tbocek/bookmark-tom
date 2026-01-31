@@ -391,10 +391,11 @@ describe("3-State Sync Algorithm", () => {
   // ============================================
 
   describe("Delete vs Move", () => {
-    it("Case 12: A deletes X, B moves X to idx=1 -> conflict", () => {
+    it("Case 12: A deletes X, B index shifts -> NO conflict (index-only is side effect)", () => {
       // Initial: X at idx=0
       // A deletes X, syncs -> remote has tombstone (idx=0)
-      // B moves X to idx=1, syncs -> 3-of-4 match, conflict (delete vs move)
+      // B's X shifted to idx=1 (side effect of adding something before it)
+      // B syncs -> NO conflict, index-only change is not intentional edit
 
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
@@ -419,9 +420,9 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // B modified index, A deleted - delete vs edit conflict
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("delete_vs_edit");
+      // Index-only change is NOT a conflict - deletion wins
+      expect(result.conflicts).to.be.empty;
+      expect(result.localChanges.deletions).to.have.lengthOf(1);
     });
 
     it("Case 13: A deletes X in /A, B moves X to /B -> conflict", () => {
@@ -1057,6 +1058,93 @@ describe("3-State Sync Algorithm", () => {
       // Folder conflict: remote deleted F1, local added Y
       expect(folderConflicts.length).to.be.greaterThan(0);
       expect(folderConflicts[0].type).to.equal("folder_deleted_remote");
+    });
+  });
+
+  // ============================================
+  // INDEX SHIFT (not a real edit)
+  // ============================================
+
+  describe("Index Shift", () => {
+    it("Case 31: A deletes folder F, B adds bookmark before F (shifts F index) -> NO conflict", () => {
+      // Initial: F at index 10
+      // A deletes F, syncs -> remote has tombstone for F at index 10
+      // B adds bookmark "f" at index 10, which shifts F to index 11
+      // B syncs -> should NOT conflict because B didn't intentionally edit F
+      // The index change is just a side effect
+
+      const oldRemoteState = [
+        { title: "F", path: ["Bookmarks Toolbar"], index: 10 },
+      ];
+      const currentLocalState = [
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Bookmarks Toolbar"],
+          index: 10,
+        },
+        { title: "F", path: ["Bookmarks Toolbar"], index: 11 }, // shifted by adding "f"
+      ];
+      const currentRemoteState = [
+        {
+          title: "F",
+          path: ["Bookmarks Toolbar"],
+          index: 10,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // Should NOT be a conflict - B didn't edit F, just the index shifted
+      // 3-of-4 match: title ✓, url ✓ (both empty), path ✓, index ✗
+      // The folder should be deleted, and "f" should be pushed to remote
+      expect(result.conflicts).to.be.empty;
+      expect(result.localChanges.deletions).to.have.lengthOf(1);
+      expect(result.localChanges.deletions[0].title).to.equal("F");
+      expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+      expect(result.remoteChanges.insertions[0].title).to.equal("f");
+    });
+
+    it("Case 32: A deletes bookmark X, B reorders bookmarks (shifts X index) -> NO conflict", () => {
+      // Initial: X at index 5
+      // A deletes X, syncs -> remote has tombstone for X at index 5
+      // B reorders, X now at index 7
+      // B syncs -> should NOT conflict, just delete X
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 7 },
+      ];
+      const currentRemoteState = [
+        {
+          title: "X",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 5,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // 3-of-4 match: title ✓, url ✓, path ✓, index ✗ -> still a match
+      // Should NOT conflict, just delete X
+      expect(result.conflicts).to.be.empty;
+      expect(result.localChanges.deletions).to.have.lengthOf(1);
+      expect(result.localChanges.deletions[0].title).to.equal("X");
     });
   });
 

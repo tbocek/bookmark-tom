@@ -301,17 +301,22 @@ function mergeStates(oldState, localState, remoteState) {
       continue;
     }
 
-    // Case: Local modified, remote deleted → conflict
+    // Case: Local modified, remote deleted → conflict (unless only index changed)
     if (localModified && remoteDeleted) {
-      conflicts.push({
-        type: "delete_vs_edit",
-        bookmark: old,
-        localAction: "modified",
-        remoteAction: "deleted",
-        localVersion: localModified.current,
-      });
-      conflictedOldKeys.add(oldKey);
-      continue;
+      const localDiff = findDifferingAttribute(old, localModified.current);
+      // Index-only change is a side effect (e.g., another bookmark added before this one)
+      // Not an intentional edit, so no conflict - deletion wins
+      if (localDiff !== "index") {
+        conflicts.push({
+          type: "delete_vs_edit",
+          bookmark: old,
+          localAction: "modified",
+          remoteAction: "deleted",
+          localVersion: localModified.current,
+        });
+        conflictedOldKeys.add(oldKey);
+        continue;
+      }
     }
 
     // Case: Both modified → check if same or different change

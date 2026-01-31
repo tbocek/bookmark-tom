@@ -271,11 +271,63 @@ document.addEventListener("DOMContentLoaded", async function () {
       );
     }
 
-    // Regular bookmark conflict
-    const title = conflict.local?.title || conflict.remote?.title || "Unknown";
-    const url = conflict.local?.url || conflict.remote?.url;
-    const path = conflict.local?.path || conflict.remote?.path || [];
-    const attr = conflict.changedAttribute;
+    // Handle delete_vs_edit conflict type
+    if (conflict.type === "delete_vs_edit") {
+      const bookmark = conflict.bookmark;
+      const localVersion = conflict.localVersion;
+      const remoteVersion = conflict.remoteVersion;
+
+      const detailsDiv = document.createElement("div");
+      detailsDiv.classList.add("conflict-details");
+
+      if (conflict.localAction === "deleted") {
+        // Local deleted, remote modified
+        const localDiv = document.createElement("div");
+        localDiv.classList.add("conflict-detail");
+        localDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">(deleted)</span>`;
+        detailsDiv.appendChild(localDiv);
+
+        const remoteDiv = document.createElement("div");
+        remoteDiv.classList.add("conflict-detail");
+        remoteDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">"${remoteVersion?.title || bookmark.title}"</span>`;
+        detailsDiv.appendChild(remoteDiv);
+      } else {
+        // Local modified, remote deleted
+        const localDiv = document.createElement("div");
+        localDiv.classList.add("conflict-detail");
+        localDiv.innerHTML = `<span class="conflict-label">Local:</span> <span class="conflict-value">"${localVersion?.title || bookmark.title}"</span>`;
+        detailsDiv.appendChild(localDiv);
+
+        const remoteDiv = document.createElement("div");
+        remoteDiv.classList.add("conflict-detail");
+        remoteDiv.innerHTML = `<span class="conflict-label">Remote:</span> <span class="conflict-value">(deleted)</span>`;
+        detailsDiv.appendChild(remoteDiv);
+      }
+
+      const attrInfo = document.createElement("div");
+      attrInfo.classList.add("conflict-attr");
+      attrInfo.textContent = "(edit vs. delete conflict)";
+      detailsDiv.appendChild(attrInfo);
+
+      return createBookmarkListItem(
+        { title: bookmark.title, url: bookmark.url, path: bookmark.path },
+        {
+          className: "conflict-item",
+          boldTitle: true,
+          appendContent: detailsDiv,
+        },
+      );
+    }
+
+    // Regular bookmark conflict (edit_conflict, add_conflict)
+    // Handle both old format (local/remote) and new format (localVersion/remoteVersion)
+    const local = conflict.local || conflict.localVersion;
+    const remote = conflict.remote || conflict.remoteVersion;
+    const title =
+      local?.title || remote?.title || conflict.bookmark?.title || "Unknown";
+    const url = local?.url || remote?.url || conflict.bookmark?.url;
+    const path = local?.path || remote?.path || conflict.bookmark?.path || [];
+    const attr = conflict.changedAttribute || conflict.attribute;
 
     // Build conflict details showing what differs
     const detailsDiv = document.createElement("div");
@@ -307,8 +359,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     };
 
     // Show the changed attribute for both local and remote
-    detailsDiv.appendChild(createDetail("Local", conflict.local, attr));
-    detailsDiv.appendChild(createDetail("Remote", conflict.remote, attr));
+    detailsDiv.appendChild(createDetail("Local", local, attr));
+    detailsDiv.appendChild(createDetail("Remote", remote, attr));
 
     // Add info about which attribute differs
     const attrInfo = document.createElement("div");
