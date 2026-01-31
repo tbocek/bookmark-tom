@@ -3,22 +3,45 @@ body {
     font-size: 14px;
     text-align: center;
     display: flex;
-    justify-content: center; /* Center the container horizontally */
-    align-items: center; /* Center the container vertically */
-    margin: 1em; /* Remove default margin */
+    justify-content: center;
+    align-items: center;
+    margin: 1em;
 }
 
 .container {
     display: flex;
     flex-direction: column;
-    align-items: center; /* Center the content horizontally */
-    justify-content: center; /* Center the content vertically */
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+#settings-button {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    color: #666;
+    border-radius: 4px;
+}
+
+#settings-button:hover {
+    background: #f0f0f0;
+    color: #333;
+}
+
+#settings-button img {
+    width: 18px;
+    height: 18px;
 }
 
 .logo {
-    width: 48px; /* Adjust the size as needed */
-    height: 48px; /* Adjust the size as needed */
-    background: url('../icons/logo.svg') no-repeat center center;
+    width: 48px;
+    height: 48px;
+    background: url("../icons/logo.svg") no-repeat center center;
     background-size: contain;
     margin: 1em;
 }
