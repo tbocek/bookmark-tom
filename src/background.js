@@ -38,7 +38,7 @@ function bookmarkKey(bm, includeIndex = true) {
   return bm.title + "#" + bm.path.join("/") + "#" + (bm.url || "");
 }
 
-// 3-of-4 matching: returns true if at least 3 attributes match
+/// 3-of-4 matching: returns true if at least 3 attributes match
 function matchBookmarks3of4(a, b) {
   if (!a || !b) return false;
 
@@ -1519,6 +1519,21 @@ browser.bookmarks.onCreated.addListener(async (id, bookmark) => {
 });
 
 browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+  if (syncInProgress) return; // Skip sync-triggered moves
+
+  // Get bookmark details
+  const [bookmark] = await browser.bookmarks.get(id);
+  const oldPath = await getBookmarkPath(moveInfo.oldParentId);
+
+  // Create tombstone for old location
+  const oldBookmark = {
+    title: bookmark.title,
+    url: bookmark.url,
+    path: oldPath,
+    index: moveInfo.oldIndex,
+  };
+  await addLocalTombstone(oldBookmark);
+
   await recordChange("moved", id, moveInfo);
   await debounceBookmarkSync(true);
 });
