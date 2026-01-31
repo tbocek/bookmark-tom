@@ -496,6 +496,28 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
 
     // Delete bookmarks
     for (const delBookmark of sortedDeletions) {
+      const isFolder = !delBookmark.url;
+
+      // If it's a folder, check if any insertions target this folder or subfolders
+      // If so, skip the deletion - new content takes precedence
+      if (isFolder) {
+        const folderPath = [...delBookmark.path, delBookmark.title];
+        const hasNewContent = insBookmarks.some((ins) => {
+          // Check if insertion path starts with the folder path
+          if (ins.path.length >= folderPath.length) {
+            return folderPath.every((segment, i) => ins.path[i] === segment);
+          }
+          return false;
+        });
+        if (hasNewContent) {
+          console.log(
+            "Skipping folder deletion - new content was added:",
+            delBookmark.title,
+          );
+          continue;
+        }
+      }
+
       const id = await locateBookmarkId(
         delBookmark.url,
         delBookmark.title,
@@ -504,8 +526,6 @@ async function modifyLocalBookmarks(delBookmarks, insBookmarks) {
       );
       try {
         if (id) {
-          // Use removeTree for folders to delete contents recursively
-          const isFolder = !delBookmark.url;
           if (isFolder) {
             await browser.bookmarks.removeTree(id);
           } else {
