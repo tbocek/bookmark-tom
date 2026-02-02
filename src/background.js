@@ -33,7 +33,7 @@ function formatSyncTime() {
 /**
  * Determine if a tombstone should be kept or filtered out
  * - Folder tombstones: remove if folder has content (path prefix check)
- * - All tombstones: remove if revived (3-of-4 match)
+ * - All tombstones: remove if revived (exact 4-of-4 match)
  */
 function shouldKeepTombstone(tombstone, activeBookmarks) {
   // For folders: check if any bookmark has path inside this folder
@@ -48,11 +48,130 @@ function shouldKeepTombstone(tombstone, activeBookmarks) {
     if (hasContent) return false; // folder has content, remove tombstone
   }
 
-  // For bookmarks (and folders without content): check 3-of-4 match
-  const revived = activeBookmarks.some((bm) => match3of4(tombstone, bm));
+  // For bookmarks (and folders without content): check exact 4-of-4 match
+  const revived = activeBookmarks.some((bm) => bookmarksEqual(tombstone, bm));
   if (revived) return false; // bookmark revived, remove tombstone
 
   return true; // keep tombstone
+}
+
+//************************** FOLDER MOVE TOMBSTONES **************************
+
+/**
+ * Recursively create tombstones for all contents of a moved folder
+ * This is needed because when a folder is moved, its children don't fire onMoved events
+ *
+ * @param {string} folderId - The folder that was moved (current location)
+ * @param {string[]} oldFolderPath - The old path where the folder used to be (including folder name)
+ */
+async function createTombstonesForFolderContents(folderId, oldFolderPath) {
+  const children = await browser.bookmarks.getChildren(folderId);
+
+  for (const child of children) {
+    // Create tombstone for this child at its old path
+    const tombstone = createTombstone({
+      title: child.title,
+      url: child.url,
+      path: oldFolderPath,
+      index: child.index,
+    });
+    await addLocalTombstoneDirectly(tombstone, bookmarksEqual);
+
+    // If child is a folder, recurse into it
+    if (!child.url) {
+      const childOldPath = [...oldFolderPath, child.title];
+      await createTombstonesForFolderContents(child.id, childOldPath);
+    }
+  }
+}
+
+//************************** DUPLICATE REMOVAL **************************
+
+/**
+ * Find and remove duplicate bookmarks (same title, url, path - different index)
+ * This is needed because with 3-of-3 matching, duplicates at same path are considered identical
+ *
+ * For folders: merge contents into the kept folder before removing duplicate,
+ * then recursively check children for duplicates
+ * For bookmarks: simply remove the duplicate
+ *
+ * @param {string} bookmarkId - The bookmark that was just created/changed/moved
+ * @param {boolean} recursive - Whether to recursively check children (default: true)
+ * @returns {Promise<void>}
+ */
+async function removeDuplicateBookmarks(bookmarkId, recursive = true) {
+  if (syncInProgress) return;
+
+  try {
+    const [bookmark] = await browser.bookmarks.get(bookmarkId);
+    if (!bookmark) return;
+
+    // Get the parent folder's children
+    const siblings = await browser.bookmarks.getChildren(bookmark.parentId);
+
+    const isFolder = !bookmark.url;
+
+    // Find duplicates (same title, url, but different id)
+    const duplicates = siblings.filter(
+      (sib) =>
+        sib.id !== bookmarkId &&
+        sib.title === bookmark.title &&
+        (sib.url || "") === (bookmark.url || ""),
+    );
+
+    // Remove duplicates (keep the one that was just created/changed)
+    for (const dup of duplicates) {
+      syncInProgress = true; // Prevent recording these changes
+      try {
+        if (isFolder) {
+          // For folders: merge contents before removing
+          const dupFolderPath = await getBookmarkPath(dup.id);
+
+          const dupChildren = await browser.bookmarks.getChildren(dup.id);
+          for (const child of dupChildren) {
+            // Create tombstone for old location before moving
+            const oldChildPath = [...dupFolderPath];
+            const tombstone = createTombstone({
+              title: child.title,
+              url: child.url,
+              path: oldChildPath,
+              index: child.index,
+            });
+            await addLocalTombstoneDirectly(tombstone, bookmarksEqual);
+
+            await browser.bookmarks.move(child.id, { parentId: bookmarkId });
+          }
+
+          // Create tombstone for the duplicate folder itself
+          const parentPath = await getBookmarkPath(dup.parentId);
+          const folderTombstone = createTombstone({
+            title: dup.title,
+            path: parentPath,
+            index: dup.index,
+          });
+          await addLocalTombstoneDirectly(folderTombstone, bookmarksEqual);
+
+          // Now remove the empty duplicate folder
+          await browser.bookmarks.remove(dup.id);
+        } else {
+          // For bookmarks: simply remove duplicate
+          await browser.bookmarks.remove(dup.id);
+        }
+      } finally {
+        syncInProgress = false;
+      }
+    }
+
+    // Recursively check children for duplicates (after merging)
+    if (recursive && isFolder) {
+      const children = await browser.bookmarks.getChildren(bookmarkId);
+      for (const child of children) {
+        await removeDuplicateBookmarks(child.id, true);
+      }
+    }
+  } catch (e) {
+    // Bookmark might have been deleted already
+  }
 }
 
 //************************** UI FUNCTIONS **************************
@@ -429,23 +548,21 @@ async function handleConflictRemote(config) {
   const remoteActive = getActive(remoteBookmarks || []);
   const remoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Calculate what to delete, insert, and update locally
+  // Calculate what to delete and insert locally (4-of-4 exact matching)
   const toDelete = [];
   const toInsert = [];
-  const toUpdate = [];
 
+  // Find local bookmarks not in remote (exact match) -> delete
   for (const local of localBookmarks) {
-    const remoteMatch = find3of4(local, remoteActive);
+    const remoteMatch = findExact(local, remoteActive);
     if (!remoteMatch) {
       toDelete.push(local);
-    } else if (!bookmarksEqual(local, remoteMatch)) {
-      // 3-of-4 match but not exact - need to update to remote version
-      toUpdate.push({ local, remote: remoteMatch });
     }
   }
 
+  // Find remote bookmarks not in local (exact match) -> insert
   for (const remote of remoteActive) {
-    const localMatch = find3of4(remote, localBookmarks);
+    const localMatch = findExact(remote, localBookmarks);
     if (!localMatch) {
       toInsert.push(remote);
     }
@@ -456,38 +573,6 @@ async function handleConflictRemote(config) {
     await modifyLocalBookmarks(toDelete, toInsert, [], (path) =>
       removeLocalTombstonesForPath(path, arraysEqual),
     );
-
-    // Apply updates (items that match 3-of-4 but differ)
-    for (const { local, remote } of toUpdate) {
-      const bookmarkId = await locateBookmarkId(
-        local.url,
-        local.title,
-        null,
-        local.path,
-      );
-      if (bookmarkId) {
-        // Update title if different
-        if (local.title !== remote.title || local.url !== remote.url) {
-          await browser.bookmarks.update(bookmarkId, {
-            title: remote.title,
-            url: remote.url,
-          });
-        }
-        // Move if path or index different
-        if (
-          !arraysEqual(local.path, remote.path) ||
-          local.index !== remote.index
-        ) {
-          const newParentId = await locateParentId(remote.path, true);
-          if (newParentId) {
-            await browser.bookmarks.move(bookmarkId, {
-              parentId: newParentId,
-              index: remote.index,
-            });
-          }
-        }
-      }
-    }
   } finally {
     syncInProgress = false;
   }
@@ -529,8 +614,6 @@ async function handleClearTombstones(config, maxAgeDays) {
     const shouldClear = (t) =>
       maxAgeDays === 0 || now - t.deletedAt >= maxAgeMs;
 
-    console.log("[CLEAR DEBUG] maxAgeDays:", maxAgeDays, "maxAgeMs:", maxAgeMs);
-
     // 1. Clear from remote
     let clearedRemote = 0;
     const remoteData = await fetchWebDAV(
@@ -541,15 +624,6 @@ async function handleClearTombstones(config, maxAgeDays) {
     if (remoteData !== null) {
       const remoteBookmarks = getActive(remoteData);
       const remoteTombstones = getTombstones(remoteData);
-      console.log(
-        "[CLEAR DEBUG] Remote tombstones found:",
-        remoteTombstones.length,
-      );
-      remoteTombstones.forEach((t) => {
-        console.log(
-          `[CLEAR DEBUG]   - "${t.title}" deletedAt=${t.deletedAt} shouldClear=${shouldClear(t)}`,
-        );
-      });
       const remainingRemote = remoteTombstones.filter((t) => !shouldClear(t));
       clearedRemote = remoteTombstones.length - remainingRemote.length;
       await updateWebDAV(config.url, config.username, config.password, [
@@ -588,6 +662,12 @@ async function handleClearTombstones(config, maxAgeDays) {
 //************************** BOOKMARK EVENT LISTENERS **************************
 
 browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
+  if (syncInProgress) return;
+
+  // Get the old bookmark data before recording the change
+  const bookmarkIdMap = await getBookmarkIdMap();
+  const oldBookmark = bookmarkIdMap[id];
+
   await recordChange(
     "changed",
     id,
@@ -595,11 +675,39 @@ browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
     getBookmarkPath,
     syncInProgress,
   );
+
+  // Create tombstone for old state if title or url changed
+  // With 3-of-3 matching, a title/url change creates a "different" bookmark
+  if (oldBookmark) {
+    const newTitle = changeInfo.title ?? oldBookmark.title;
+    const newUrl = changeInfo.url ?? oldBookmark.url;
+
+    const titleChanged =
+      changeInfo.title !== undefined && changeInfo.title !== oldBookmark.title;
+    const urlChanged =
+      changeInfo.url !== undefined && changeInfo.url !== oldBookmark.url;
+
+    if (titleChanged || urlChanged) {
+      // Create tombstone for the old bookmark state
+      const tombstone = createTombstone({
+        title: oldBookmark.title,
+        url: oldBookmark.url,
+        path: oldBookmark.path,
+        index: oldBookmark.index,
+      });
+      await addLocalTombstoneDirectly(tombstone, bookmarksEqual);
+    }
+  }
+
+  // Check for duplicates after title/url change
+  await removeDuplicateBookmarks(id);
   await debounceBookmarkSync(true);
 });
 
 browser.bookmarks.onCreated.addListener(async (id, bookmark) => {
   await recordChange("created", id, bookmark, getBookmarkPath, syncInProgress);
+  // Check for duplicates after creating
+  await removeDuplicateBookmarks(id);
   await debounceBookmarkSync(true);
 });
 
@@ -619,7 +727,15 @@ browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
   const tombstone = calcMove(oldBookmark);
   await addLocalTombstoneDirectly(tombstone, match3of4);
 
+  // If moving a folder, create tombstones for all children at their old paths
+  if (!bookmark.url) {
+    const oldFolderPath = [...oldPath, bookmark.title];
+    await createTombstonesForFolderContents(id, oldFolderPath);
+  }
+
   await recordChange("moved", id, moveInfo, getBookmarkPath, syncInProgress);
+  // Check for duplicates after moving to new folder
+  await removeDuplicateBookmarks(id);
   await debounceBookmarkSync(true);
 });
 

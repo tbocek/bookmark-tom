@@ -1,23 +1,20 @@
 /**
- * Bookmark Sync Algorithm - 3-State Design with 4-of-4 Matching
+ * Bookmark Sync Algorithm - 3-State Design with 3-of-3 Matching
  *
  * States:
  * - oldRemoteState: Snapshot of remote at last successful sync (includes tombstones)
  * - currentLocalState: Current local bookmarks (includes tombstones)
  * - currentRemoteState: Fresh remote state fetched at sync time (includes tombstones)
  *
- * Internal Logic (4-of-4 exact matching):
- * - Two bookmarks are the "same" only if all 4 attributes match (title, url, path, index)
- * - Move = delete at old location + insert at new location
- * - Tombstones only match their exact bookmark
- *
- * Conflict Detection (3-of-4 matching):
- * - Used to find "same" bookmark that was changed differently on each side
+ * Internal Logic (3-of-3 matching - ignores index):
+ * - Two bookmarks are the "same" if title, url, and path match (index ignored)
+ * - This allows index shifts (reordering) to not create "new" bookmarks
+ * - Duplicates (same title, url, path) should be removed by the caller
  *
  * Sync Flow:
- * 1. Categorize changes on each side (using 3-of-4 to find same bookmarks)
- * 2. Detect conflicts (same bookmark changed differently)
- * 3. Build newState (excluding conflicted items)
+ * 1. Categorize changes on each side (unchanged, deleted, added)
+ * 2. Build newState based on changes
+ * 3. Protect folders that have content from deletion
  * 4. Diff to get localChanges and remoteChanges
  */
 
@@ -33,18 +30,30 @@ function arraysEqual(a, b) {
 }
 
 /**
- * Exact 4-of-4 key for internal matching
+ * 3-of-3 key for matching (ignores index)
  */
 function bookmarkKey(bm) {
   const url = bm.url || "";
   const path = (bm.path || []).join("/");
-  return `${bm.title}|${path}|${url}|${bm.index}`;
+  return `${bm.title}|${path}|${url}`;
 }
 
 /**
- * Check if two bookmarks match exactly (4-of-4)
+ * Check if two bookmarks match (3-of-3: title, url, path - ignores index)
  */
 function bookmarksEqual(a, b) {
+  return (
+    a.title === b.title &&
+    (a.url || "") === (b.url || "") &&
+    arraysEqual(a.path, b.path)
+  );
+}
+
+/**
+ * Check if two bookmarks match exactly (4-of-4, including index)
+ * Used for UI display and precise matching when needed
+ */
+function bookmarksEqualExact(a, b) {
   return (
     a.title === b.title &&
     (a.url || "") === (b.url || "") &&
@@ -54,7 +63,7 @@ function bookmarksEqual(a, b) {
 }
 
 /**
- * Check if two bookmarks match by 3-of-4 (for conflict detection)
+ * Check if two bookmarks match by 3-of-4 (for UI grouping only)
  */
 function match3of4(a, b) {
   let matches = 0;
@@ -66,14 +75,14 @@ function match3of4(a, b) {
 }
 
 /**
- * Find exact match in list (4-of-4)
+ * Find match in list (3-of-3)
  */
 function findExact(bookmark, list) {
   return list.find((b) => bookmarksEqual(bookmark, b));
 }
 
 /**
- * Find 3-of-4 match in list
+ * Find 3-of-4 match in list (for UI grouping only)
  */
 function find3of4(bookmark, list) {
   return list.find((b) => match3of4(bookmark, b));
@@ -162,14 +171,14 @@ function diffStates(current, target, debugLabel = "") {
   const currentKeys = new Set(currentActive.map(bookmarkKey));
   const targetKeys = new Set(targetActive.map(bookmarkKey));
 
-  // Items in target but not in current → insertions
+  // Items in target but not in current -> insertions
   for (const tgt of targetActive) {
     if (!currentKeys.has(bookmarkKey(tgt))) {
       insertions.push(tgt);
     }
   }
 
-  // Items in current but not in target → deletions
+  // Items in current but not in target -> deletions
   for (const curr of currentActive) {
     if (!targetKeys.has(bookmarkKey(curr))) {
       deletions.push(curr);
@@ -180,29 +189,27 @@ function diffStates(current, target, debugLabel = "") {
 }
 
 // ============================================
-// CATEGORIZE CHANGES (using 3-of-4)
+// CATEGORIZE CHANGES (4-of-4 exact matching)
 // ============================================
 
 /**
  * Categorize what changed between old and current state
- * Uses 3-of-4 to identify "same" bookmark
+ * Uses 4-of-4 exact matching only
  *
- * Returns: { unchanged, modified, deleted, added }
+ * Returns: { unchanged, deleted, added }
  */
 function categorizeChanges(oldActive, currentActive, currentTombstones) {
-  const unchanged = []; // In both, exactly same
-  const modified = []; // In both (3-of-4), but different
-  const deleted = []; // In old, not in current (or has tombstone)
+  const unchanged = []; // In both, exactly same (4-of-4)
+  const deleted = []; // In old, has tombstone in current (4-of-4)
   const added = []; // In current, not in old
 
   const matchedOld = new Set();
   const matchedCurrent = new Set();
 
-  // Find matches between old and current using 3-of-4
+  // Find exact matches between old and current (4-of-4)
   for (let i = 0; i < oldActive.length; i++) {
     const old = oldActive[i];
 
-    // First check for exact match
     const exactMatch = currentActive.findIndex(
       (c, j) => !matchedCurrent.has(j) && bookmarksEqual(old, c),
     );
@@ -214,36 +221,24 @@ function categorizeChanges(oldActive, currentActive, currentTombstones) {
       continue;
     }
 
-    // Check for 3-of-4 match (modified)
-    const match3of4Idx = currentActive.findIndex(
-      (c, j) => !matchedCurrent.has(j) && match3of4(old, c),
-    );
-
-    if (match3of4Idx !== -1) {
-      modified.push({ old, current: currentActive[match3of4Idx] });
-      matchedOld.add(i);
-      matchedCurrent.add(match3of4Idx);
-      continue;
-    }
-
-    // Check if deleted (only if there's a tombstone)
-    const hasTombstone = find3of4(old, currentTombstones);
+    // Check if deleted (must have exact tombstone match)
+    const hasTombstone = findExact(old, currentTombstones);
     if (hasTombstone) {
       deleted.push({ old, tombstone: hasTombstone });
       matchedOld.add(i);
     }
-    // If no tombstone and not in current, don't mark as deleted -
-    // it will be handled as "unchanged" (missing from this side's perspective)
+    // If no exact match and no tombstone, item is "missing" from this side
+    // Will be handled in merge logic
   }
 
-  // Items in current that weren't matched → added
+  // Items in current that weren't matched -> added
   for (let j = 0; j < currentActive.length; j++) {
     if (!matchedCurrent.has(j)) {
       added.push(currentActive[j]);
     }
   }
 
-  return { unchanged, modified, deleted, added };
+  return { unchanged, deleted, added };
 }
 
 // ============================================
@@ -276,22 +271,17 @@ function mergeStates(oldState, localState, remoteState) {
   );
 
   // ----------------------------------------
-  // PASS 2: Detect conflicts
+  // PASS 2: Build newState
   // ----------------------------------------
 
-  const conflicts = [];
-  const conflictedOldKeys = new Set(); // Track which old bookmarks have conflicts
+  const newState = [];
+  const addedKeys = new Set();
 
-  // For each old bookmark, check if both sides changed it
+  // Process old bookmarks
   for (const old of oldActive) {
-    const oldKey = bookmarkKey(old);
-
     // Find what local did to this bookmark
     const localUnchanged = localChanges.unchanged.find((u) =>
       bookmarksEqual(u.old, old),
-    );
-    const localModified = localChanges.modified.find((m) =>
-      bookmarksEqual(m.old, old),
     );
     const localDeleted = localChanges.deleted.find((d) =>
       bookmarksEqual(d.old, old),
@@ -300,132 +290,6 @@ function mergeStates(oldState, localState, remoteState) {
     // Find what remote did to this bookmark
     const remoteUnchanged = remoteChanges.unchanged.find((u) =>
       bookmarksEqual(u.old, old),
-    );
-    const remoteModified = remoteChanges.modified.find((m) =>
-      bookmarksEqual(m.old, old),
-    );
-    const remoteDeleted = remoteChanges.deleted.find((d) =>
-      bookmarksEqual(d.old, old),
-    );
-
-    // Case: Local deleted, remote modified → conflict (unless only index changed)
-    if (localDeleted && remoteModified) {
-      const remoteDiff = findDifferingAttribute(old, remoteModified.current);
-      // Index-only change is a side effect, not an intentional edit
-      // No conflict - deletion wins
-      if (remoteDiff !== "index") {
-        conflicts.push({
-          type: "delete_vs_edit",
-          bookmark: old,
-          localAction: "deleted",
-          remoteAction: "modified",
-          remoteVersion: remoteModified.current,
-        });
-        conflictedOldKeys.add(oldKey);
-        continue;
-      }
-    }
-
-    // Case: Local modified, remote deleted → conflict (unless only index changed)
-    if (localModified && remoteDeleted) {
-      const localDiff = findDifferingAttribute(old, localModified.current);
-      // Index-only change is a side effect (e.g., another bookmark added before this one)
-      // Not an intentional edit, so no conflict - deletion wins
-      if (localDiff !== "index") {
-        conflicts.push({
-          type: "delete_vs_edit",
-          bookmark: old,
-          localAction: "modified",
-          remoteAction: "deleted",
-          localVersion: localModified.current,
-        });
-        conflictedOldKeys.add(oldKey);
-        continue;
-      }
-    }
-
-    // Case: Both modified → check if same or different change
-    if (localModified && remoteModified) {
-      const localCurrent = localModified.current;
-      const remoteCurrent = remoteModified.current;
-
-      if (bookmarksEqual(localCurrent, remoteCurrent)) {
-        // Same change - no conflict
-        continue;
-      }
-
-      // Different changes - check which attributes differ
-      const localDiff = findDifferingAttribute(old, localCurrent);
-      const remoteDiff = findDifferingAttribute(old, remoteCurrent);
-
-      if (localDiff && remoteDiff && localDiff !== remoteDiff) {
-        // Different attributes changed - can merge, no conflict
-        continue;
-      }
-
-      // Same attribute changed differently → conflict
-      conflicts.push({
-        type: "edit_conflict",
-        bookmark: old,
-        localVersion: localCurrent,
-        remoteVersion: remoteCurrent,
-        attribute: localDiff || remoteDiff,
-      });
-      conflictedOldKeys.add(oldKey);
-    }
-  }
-
-  // Check for add conflicts (both added similar but different bookmark)
-  for (const localAdd of localChanges.added) {
-    const remoteMatch = find3of4(localAdd, remoteChanges.added);
-    if (remoteMatch && !bookmarksEqual(localAdd, remoteMatch)) {
-      // Both added similar bookmark with differences
-      // Check if this is actually an edit of an old bookmark
-      const oldMatch = find3of4(localAdd, oldActive);
-      if (oldMatch) {
-        // This is edit conflict, already handled above
-        continue;
-      }
-
-      conflicts.push({
-        type: "add_conflict",
-        localVersion: localAdd,
-        remoteVersion: remoteMatch,
-      });
-    }
-  }
-
-  // ----------------------------------------
-  // PASS 3: Build newState (excluding conflicts)
-  // ----------------------------------------
-
-  const newState = [];
-  const addedKeys = new Set();
-
-  // Process old bookmarks
-  for (const old of oldActive) {
-    const oldKey = bookmarkKey(old);
-
-    // Skip if conflicted
-    if (conflictedOldKeys.has(oldKey)) {
-      continue;
-    }
-
-    const localUnchanged = localChanges.unchanged.find((u) =>
-      bookmarksEqual(u.old, old),
-    );
-    const localModified = localChanges.modified.find((m) =>
-      bookmarksEqual(m.old, old),
-    );
-    const localDeleted = localChanges.deleted.find((d) =>
-      bookmarksEqual(d.old, old),
-    );
-
-    const remoteUnchanged = remoteChanges.unchanged.find((u) =>
-      bookmarksEqual(u.old, old),
-    );
-    const remoteModified = remoteChanges.modified.find((m) =>
-      bookmarksEqual(m.old, old),
     );
     const remoteDeleted = remoteChanges.deleted.find((d) =>
       bookmarksEqual(d.old, old),
@@ -444,23 +308,9 @@ function mergeStates(oldState, localState, remoteState) {
       continue;
     }
 
-    // Local unchanged, remote modified
-    if (localUnchanged && remoteModified) {
-      newState.push(remoteModified.current);
-      addedKeys.add(bookmarkKey(remoteModified.current));
-      continue;
-    }
-
     // Local unchanged, remote deleted
     if (localUnchanged && remoteDeleted) {
       newState.push(createTombstone(old));
-      continue;
-    }
-
-    // Local modified, remote unchanged
-    if (localModified && remoteUnchanged) {
-      newState.push(localModified.current);
-      addedKeys.add(bookmarkKey(localModified.current));
       continue;
     }
 
@@ -470,105 +320,39 @@ function mergeStates(oldState, localState, remoteState) {
       continue;
     }
 
-    // Local deleted, remote missing (no tombstone) -> push tombstone
-    if (localDeleted && !remoteUnchanged && !remoteModified && !remoteDeleted) {
+    // Local deleted, remote missing (not in remote at all) -> push tombstone
+    if (localDeleted && !remoteUnchanged && !remoteDeleted) {
       newState.push(createTombstone(old));
       continue;
     }
 
-    // Remote deleted, local missing (no tombstone) -> keep tombstone
-    if (remoteDeleted && !localUnchanged && !localModified && !localDeleted) {
+    // Remote deleted, local missing (not in local at all) -> push tombstone
+    if (remoteDeleted && !localUnchanged && !localDeleted) {
       newState.push(createTombstone(old));
       continue;
     }
 
-    // Local modified (index-only), remote deleted -> deletion wins (not a conflict)
-    // Real conflicts (non-index changes) were already filtered in conflict detection
-    if (localModified && remoteDeleted) {
-      newState.push(createTombstone(old));
-      continue;
-    }
-
-    // Remote modified (index-only), local deleted -> deletion wins (not a conflict)
-    if (remoteModified && localDeleted) {
-      newState.push(createTombstone(old));
-      continue;
-    }
-
-    // Both modified (same change or mergeable - conflicts already filtered)
-    if (localModified && remoteModified) {
-      const localCurrent = localModified.current;
-      const remoteCurrent = remoteModified.current;
-
-      if (bookmarksEqual(localCurrent, remoteCurrent)) {
-        newState.push(localCurrent);
-        addedKeys.add(bookmarkKey(localCurrent));
-      } else {
-        // Merge different attributes
-        const merged = { ...old };
-        const localDiff = findDifferingAttribute(old, localCurrent);
-        const remoteDiff = findDifferingAttribute(old, remoteCurrent);
-
-        if (localDiff === "title") merged.title = localCurrent.title;
-        if (localDiff === "url") merged.url = localCurrent.url;
-        if (localDiff === "path") merged.path = localCurrent.path;
-        if (localDiff === "index") merged.index = localCurrent.index;
-
-        if (remoteDiff === "title") merged.title = remoteCurrent.title;
-        if (remoteDiff === "url") merged.url = remoteCurrent.url;
-        if (remoteDiff === "path") merged.path = remoteCurrent.path;
-        if (remoteDiff === "index") merged.index = remoteCurrent.index;
-
-        newState.push(merged);
-        addedKeys.add(bookmarkKey(merged));
-      }
-      continue;
-    }
-
-    // One side has it unchanged, other side missing (no tombstone) -> the side that has it wins
-    if (
-      localUnchanged &&
-      !remoteUnchanged &&
-      !remoteModified &&
-      !remoteDeleted
-    ) {
+    // Local unchanged, remote missing (no match, no tombstone) -> keep it
+    if (localUnchanged && !remoteUnchanged && !remoteDeleted) {
       newState.push(old);
       addedKeys.add(bookmarkKey(old));
       continue;
     }
 
-    if (remoteUnchanged && !localUnchanged && !localModified && !localDeleted) {
+    // Remote unchanged, local missing (no match, no tombstone) -> keep it
+    if (remoteUnchanged && !localUnchanged && !localDeleted) {
       newState.push(old);
       addedKeys.add(bookmarkKey(old));
       continue;
     }
 
-    // Local modified, remote missing (no tombstone) -> local wins
-    if (
-      localModified &&
-      !remoteUnchanged &&
-      !remoteModified &&
-      !remoteDeleted
-    ) {
-      newState.push(localModified.current);
-      addedKeys.add(bookmarkKey(localModified.current));
-      continue;
-    }
-
-    // Remote modified, local missing (no tombstone) -> remote wins
-    if (remoteModified && !localUnchanged && !localModified && !localDeleted) {
-      newState.push(remoteModified.current);
-      addedKeys.add(bookmarkKey(remoteModified.current));
-      continue;
-    }
-
-    // Both sides missing without tombstone -> stays deleted (do nothing)
+    // Both sides missing (no match, no tombstone on either side)
+    // This can happen if the item was never on this machine
+    // Don't add to newState (effectively deleted)
     if (
       !localUnchanged &&
-      !localModified &&
       !localDeleted &&
       !remoteUnchanged &&
-      !remoteModified &&
       !remoteDeleted
     ) {
       continue;
@@ -579,8 +363,8 @@ function mergeStates(oldState, localState, remoteState) {
     console.warn(
       `[SYNC WARNING] Bookmark "${old.title}" did not match any merge condition. ` +
         `Keeping it to prevent data loss. ` +
-        `local: unchanged=${!!localUnchanged} modified=${!!localModified} deleted=${!!localDeleted}, ` +
-        `remote: unchanged=${!!remoteUnchanged} modified=${!!remoteModified} deleted=${!!remoteDeleted}`,
+        `local: unchanged=${!!localUnchanged} deleted=${!!localDeleted}, ` +
+        `remote: unchanged=${!!remoteUnchanged} deleted=${!!remoteDeleted}`,
     );
     newState.push(old);
     addedKeys.add(bookmarkKey(old));
@@ -591,13 +375,6 @@ function mergeStates(oldState, localState, remoteState) {
     const key = bookmarkKey(localAdd);
     if (addedKeys.has(key)) continue;
 
-    // Check if conflicts with remote add
-    const hasConflict = conflicts.some(
-      (c) =>
-        c.type === "add_conflict" && bookmarksEqual(c.localVersion, localAdd),
-    );
-    if (hasConflict) continue;
-
     // Check if remote has exact same
     const remoteExact = findExact(localAdd, remoteActive);
     if (remoteExact) {
@@ -606,7 +383,7 @@ function mergeStates(oldState, localState, remoteState) {
       continue;
     }
 
-    // Check if remote deleted this
+    // Check if remote deleted this (exact tombstone match)
     const remoteTomb = findExact(localAdd, remoteTombstones);
     if (remoteTomb) {
       // Local added, remote has tombstone - local wins (recreated)
@@ -625,14 +402,7 @@ function mergeStates(oldState, localState, remoteState) {
     const key = bookmarkKey(remoteAdd);
     if (addedKeys.has(key)) continue;
 
-    // Check if conflicts with local add
-    const hasConflict = conflicts.some(
-      (c) =>
-        c.type === "add_conflict" && bookmarksEqual(c.remoteVersion, remoteAdd),
-    );
-    if (hasConflict) continue;
-
-    // Check if local deleted this
+    // Check if local deleted this (exact tombstone match)
     const localTomb = findExact(remoteAdd, localTombstones);
     if (localTomb) {
       // Remote added, local has tombstone - remote wins (recreated)
@@ -646,7 +416,73 @@ function mergeStates(oldState, localState, remoteState) {
     addedKeys.add(key);
   }
 
-  return { newState, conflicts };
+  return { newState, conflicts: [] };
+}
+
+// ============================================
+// FOLDER PROTECTION
+// ============================================
+
+/**
+ * Check if a folder has any content in the given bookmark list
+ * @param {Object} folder - The folder bookmark (no url)
+ * @param {Array} bookmarks - List of bookmarks to check
+ * @returns {boolean} true if folder has content
+ */
+function folderHasContent(folder, bookmarks) {
+  const folderPath = [...folder.path, folder.title];
+  return bookmarks.some((bm) => {
+    if (isTombstone(bm)) return false;
+    return pathStartsWith(bm.path, folderPath);
+  });
+}
+
+/**
+ * Remove folder tombstones from newState if the folder has content
+ * This prevents deleting folders that contain new bookmarks
+ *
+ * @param {Array} newState - The merged state
+ * @returns {Array} newState with protected folders converted back to active
+ */
+function protectFoldersWithContent(newState) {
+  const activeBookmarks = getActive(newState);
+  const result = [];
+
+  for (const item of newState) {
+    // If it's a folder tombstone, check if folder has content
+    if (isTombstone(item) && isFolder(item)) {
+      if (folderHasContent(item, activeBookmarks)) {
+        // Convert tombstone back to active folder
+        result.push({
+          title: item.title,
+          path: item.path,
+          index: item.index,
+          // No url (it's a folder), no deleted flag
+        });
+        continue;
+      }
+    }
+    result.push(item);
+  }
+
+  return result;
+}
+
+// ============================================
+// FOLDER CONFLICT DETECTION (stub - no longer used)
+// ============================================
+
+/**
+ * Detect folder-level conflicts
+ * With 4-of-4 matching, folder conflicts are handled by protectFoldersWithContent
+ * This function is kept for API compatibility but always returns empty
+ */
+function detectFolderConflicts(
+  oldRemoteState,
+  currentLocalState,
+  currentRemoteState,
+) {
+  return [];
 }
 
 // ============================================
@@ -662,52 +498,28 @@ function calcSyncChanges(
   currentRemoteState,
 ) {
   // Step 1: Merge to get newState
-  const { newState, conflicts } = mergeStates(
+  let { newState, conflicts } = mergeStates(
     oldRemoteState || [],
     currentLocalState || [],
     currentRemoteState || [],
   );
 
-  // Step 2: Diff currentLocalState vs newState → localChanges
-  let localChanges = diffStates(
+  // Step 2: Protect folders that have content from deletion
+  newState = protectFoldersWithContent(newState);
+
+  // Step 3: Diff currentLocalState vs newState -> localChanges
+  const localChanges = diffStates(
     currentLocalState || [],
     newState,
-    "LOCAL→newState",
+    "LOCAL->newState",
   );
 
-  // Step 3: Diff currentRemoteState vs newState → remoteChanges
-  let remoteChanges = diffStates(
+  // Step 4: Diff currentRemoteState vs newState -> remoteChanges
+  const remoteChanges = diffStates(
     currentRemoteState || [],
     newState,
-    "REMOTE→newState",
+    "REMOTE->newState",
   );
-
-  // Step 4: Filter out conflicted items from changes
-  // Conflicted items are excluded from newState, so they appear as deletions
-  // But they should be handled by conflict resolution, not shown as deletions
-  if (conflicts.length > 0) {
-    const isConflicted = (bm) => {
-      return conflicts.some((c) => {
-        // Check against localVersion, remoteVersion, or bookmark
-        if (c.localVersion && match3of4(bm, c.localVersion)) return true;
-        if (c.remoteVersion && match3of4(bm, c.remoteVersion)) return true;
-        if (c.bookmark && match3of4(bm, c.bookmark)) return true;
-        return false;
-      });
-    };
-
-    localChanges = {
-      insertions: localChanges.insertions.filter((i) => !isConflicted(i)),
-      deletions: localChanges.deletions.filter((d) => !isConflicted(d)),
-      updates: localChanges.updates.filter((u) => !isConflicted(u)),
-    };
-
-    remoteChanges = {
-      insertions: remoteChanges.insertions.filter((i) => !isConflicted(i)),
-      deletions: remoteChanges.deletions.filter((d) => !isConflicted(d)),
-      updates: remoteChanges.updates.filter((u) => !isConflicted(u)),
-    };
-  }
 
   return {
     localChanges,
@@ -715,30 +527,6 @@ function calcSyncChanges(
     conflicts,
     newState,
   };
-}
-
-// ============================================
-// FOLDER CONFLICT DETECTION
-// ============================================
-
-/**
- * Detect folder-level conflicts (folder deleted on one side, OLD content modified on other)
- *
- * NOT a conflict:
- * - Folder deleted + NEW content added -> folder recreated with new content
- *
- * IS a conflict:
- * - Folder deleted + OLD content modified -> user must choose
- */
-function detectFolderConflicts(
-  oldRemoteState,
-  currentLocalState,
-  currentRemoteState,
-) {
-  // New content in a deleted folder is NOT a conflict - folder gets recreated
-  // Only conflict if OLD content was modified (not just present)
-  // For now, return empty - new content means folder survives
-  return [];
 }
 
 // ============================================
@@ -752,10 +540,13 @@ if (typeof module !== "undefined" && module.exports) {
     diffStates,
     mergeStates,
     categorizeChanges,
+    protectFoldersWithContent,
+    folderHasContent,
     arraysEqual,
     bookmarkKey,
     match3of4,
     bookmarksEqual,
+    bookmarksEqualExact,
     findExact,
     find3of4,
     isTombstone,
@@ -777,10 +568,13 @@ if (typeof module !== "undefined" && module.exports) {
   diffStates,
   mergeStates,
   categorizeChanges,
+  protectFoldersWithContent,
+  folderHasContent,
   arraysEqual,
   bookmarkKey,
   match3of4,
   bookmarksEqual,
+  bookmarksEqualExact,
   findExact,
   find3of4,
   isTombstone,

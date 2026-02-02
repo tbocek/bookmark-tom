@@ -378,16 +378,26 @@ describe("3-State Sync Algorithm", () => {
   // ============================================
 
   describe("Delete vs Edit", () => {
-    it("Case 10: A deletes X, B edits X -> conflict", () => {
+    it("Case 10: A deletes X, B edits X -> no conflict, X deleted, X-edited pushed", () => {
       // Initial: X
       // A deletes X, syncs -> remote has tombstone
-      // B edits X title, syncs -> conflict (delete vs edit)
+      // B edits X title (creates tombstone for old X), syncs
+      // Result: Both have tombstone for X, X-edited pushed to remote
 
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
       ];
       const currentLocalState = [
         { title: "X-edited", url: "http://x.com", path: ["Toolbar"], index: 0 },
+        // Tombstone for old X (created when B edited X)
+        {
+          title: "X",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
       const currentRemoteState = [
         {
@@ -406,15 +416,19 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // B modified X - should conflict (delete vs edit)
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("delete_vs_edit");
+      // No conflict - both deleted X, X-edited is a local addition
+      expect(result.conflicts).to.be.empty;
+      // X-edited pushed to remote
+      expect(
+        result.remoteChanges.insertions.some((i) => i.title === "X-edited"),
+      ).to.be.true;
     });
 
-    it("Case 11: A edits X, B deletes X -> conflict", () => {
+    it("Case 11: A edits X, B deletes X -> no conflict, X deleted, X-new inserted locally", () => {
       // Initial: X
-      // A edits X title, syncs -> remote has X "new"
-      // B deletes X, syncs -> conflict (delete vs edit)
+      // A edits X title (creates tombstone for old X), syncs -> remote has X-new + tombstone
+      // B deletes X, syncs
+      // Result: Both have tombstone for X, X-new inserted locally
 
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
@@ -431,6 +445,15 @@ describe("3-State Sync Algorithm", () => {
       ];
       const currentRemoteState = [
         { title: "X-new", url: "http://x.com", path: ["Toolbar"], index: 0 },
+        // Tombstone for old X (created when A edited X)
+        {
+          title: "X",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
 
       const result = calcSyncChanges(
@@ -439,9 +462,11 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // B deleted, A modified - should conflict (delete vs edit)
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("delete_vs_edit");
+      // No conflict - both deleted X, X-new is a remote addition
+      expect(result.conflicts).to.be.empty;
+      // X-new inserted locally
+      expect(result.localChanges.insertions.some((i) => i.title === "X-new")).to
+        .be.true;
     });
   });
 
@@ -450,17 +475,19 @@ describe("3-State Sync Algorithm", () => {
   // ============================================
 
   describe("Delete vs Move", () => {
-    it("Case 12: A deletes X, B index shifts -> NO conflict (index-only is side effect)", () => {
+    it("Case 12: A deletes X, B index shifts -> NO conflict, X deleted locally", () => {
       // Initial: X at idx=0
-      // A deletes X, syncs -> remote has tombstone (idx=0)
+      // A deletes X, syncs -> remote has tombstone
       // B's X shifted to idx=1 (side effect of adding something before it)
-      // B syncs -> NO conflict, index-only change is not intentional edit
+      // With 3-of-3 matching (ignoring index), X at idx=1 is the SAME as X at idx=0
+      // Since remote has tombstone for X, X gets deleted locally
 
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
       ];
       const currentLocalState = [
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 1 },
+        // No tombstone needed - X just shifted index, same bookmark
       ];
       const currentRemoteState = [
         {
@@ -479,15 +506,20 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Index-only change is NOT a conflict - deletion wins
+      // With 3-of-3: local X (idx=1) matches baseline X and remote tombstone
+      // Result: X is deleted (remote deletion wins)
       expect(result.conflicts).to.be.empty;
-      expect(result.localChanges.deletions).to.have.lengthOf(1);
+      // X deleted locally
+      expect(result.localChanges.deletions.some((d) => d.title === "X")).to.be
+        .true;
     });
 
-    it("Case 13: A deletes X in /A, B moves X to /B -> conflict", () => {
+    it("Case 13: A deletes X in /A, B moves X to /B -> no conflict, X survives in /B", () => {
       // Initial: X in path /A
       // A deletes X, syncs -> remote has tombstone (path=/A)
-      // B moves X to /B, syncs -> 3-of-4 match (title, url, index), conflict
+      // B moves X to /B (creates tombstone for X at /A)
+      // With 3-of-3: X at /A and X at /B are DIFFERENT (path differs)
+      // Result: X at /A deleted (both agree), X at /B pushed to remote
 
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar", "A"], index: 0 },
@@ -520,15 +552,22 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // B moved (changed path), A deleted - 3-of-4 match (title, url, index) -> conflict
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("delete_vs_edit");
+      // With 3-of-3: X at /A deleted (both have tombstone), X at /B is new (pushed)
+      expect(result.conflicts).to.be.empty;
+      // X at /B pushed to remote
+      expect(
+        result.remoteChanges.insertions.some(
+          (i) => i.title === "X" && i.path.includes("B"),
+        ),
+      ).to.be.true;
     });
 
-    it("Case 14: A deletes X in F1, B moves X to F2 -> conflict", () => {
+    it("Case 14: A deletes X in F1, B moves X to F2 -> no conflict, X survives in F2", () => {
       // Initial: X in F1
       // A deletes X, syncs -> remote has tombstone (F1)
-      // B moves X to F2, syncs -> conflict (delete vs move)
+      // B moves X to F2 (creates tombstone for X at F1)
+      // With 3-of-3: X at F1 and X at F2 are DIFFERENT (path differs)
+      // Result: X at F1 deleted, X at F2 pushed to remote
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -567,9 +606,14 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // B moved X (changed path), A deleted - conflict
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("delete_vs_edit");
+      // With 3-of-3: X at F1 deleted, X at F2 is new (pushed)
+      expect(result.conflicts).to.be.empty;
+      // X at F2 pushed to remote
+      expect(
+        result.remoteChanges.insertions.some(
+          (i) => i.title === "X" && i.path.includes("F2"),
+        ),
+      ).to.be.true;
     });
   });
 
@@ -578,19 +622,39 @@ describe("3-State Sync Algorithm", () => {
   // ============================================
 
   describe("Edit vs Edit", () => {
-    it("Case 15: Both edit title differently -> conflict", () => {
+    it("Case 15: Both edit title differently -> no conflict, both versions exist", () => {
       // Initial: X with title "old"
-      // A edits title to "A", syncs -> remote has "A"
-      // B edits title to "B", syncs -> conflict
+      // A edits title to "A" (creates tombstone for "old"), syncs
+      // B edits title to "B" (creates tombstone for "old"), syncs
+      // With 3-of-3: "old", "A", and "B" are all DIFFERENT (title differs)
+      // Result: "old" deleted (both have tombstone), "A" inserted locally, "B" pushed to remote
 
       const oldRemoteState = [
         { title: "old", url: "http://x.com", path: ["Toolbar"], index: 0 },
       ];
       const currentLocalState = [
         { title: "B", url: "http://x.com", path: ["Toolbar"], index: 0 },
+        // Tombstone for "old" (created when B renamed)
+        {
+          title: "old",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
       const currentRemoteState = [
         { title: "A", url: "http://x.com", path: ["Toolbar"], index: 0 },
+        // Tombstone for "old" (created when A renamed)
+        {
+          title: "old",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
 
       const result = calcSyncChanges(
@@ -599,9 +663,14 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Both changed title - conflict
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("edit_conflict");
+      // With 3-of-3: no conflict, both "A" and "B" exist as separate bookmarks
+      expect(result.conflicts).to.be.empty;
+      // "A" inserted locally
+      expect(result.localChanges.insertions.some((i) => i.title === "A")).to.be
+        .true;
+      // "B" pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "B")).to.be
+        .true;
     });
 
     it("Case 16: A edits title, B edits url -> merge both", () => {
@@ -656,23 +725,39 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts.length).to.be.lessThanOrEqual(1);
     });
 
-    it("Case 39: Both edit title differently -> conflict, remote master should update local", () => {
+    it("Case 39: Both edit title differently -> no conflict, both versions exist", () => {
       // Initial: f
-      // Machine 2: f -> f5, sync
-      // Machine 1: f -> f6, sync -> conflict
-      // User chooses "remote master" -> f6 should become f5
-      //
-      // This test verifies the conflict is detected and the 3-of-4 match exists
-      // The actual update is done by handleConflictRemote in background.js
+      // Machine 2: f -> f5 (creates tombstone for "f"), sync
+      // Machine 1: f -> f6 (creates tombstone for "f"), sync
+      // With 3-of-3: "f", "f5", and "f6" are all DIFFERENT (title differs)
+      // Result: "f" deleted, "f5" inserted locally, "f6" pushed to remote
 
       const oldRemoteState = [
         { title: "f", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
       ];
       const currentLocalState = [
         { title: "f6", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
+        // Tombstone for "f"
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Toolbar", "Test2"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
       const currentRemoteState = [
         { title: "f5", url: "http://f/", path: ["Toolbar", "Test2"], index: 0 },
+        // Tombstone for "f"
+        {
+          title: "f",
+          url: "http://f/",
+          path: ["Toolbar", "Test2"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
       ];
 
       const result = calcSyncChanges(
@@ -681,16 +766,14 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Conflict detected
-      expect(result.conflicts).to.have.lengthOf(1);
-      expect(result.conflicts[0].type).to.equal("edit_conflict");
-      expect(result.conflicts[0].attribute).to.equal("title");
-      expect(result.conflicts[0].localVersion.title).to.equal("f6");
-      expect(result.conflicts[0].remoteVersion.title).to.equal("f5");
-
-      // Conflicted items should NOT appear in changes (filtered out)
-      expect(result.localChanges.deletions).to.be.empty;
-      expect(result.remoteChanges.deletions).to.be.empty;
+      // With 3-of-3: no conflict, both exist as separate bookmarks
+      expect(result.conflicts).to.be.empty;
+      // "f5" inserted locally
+      expect(result.localChanges.insertions.some((i) => i.title === "f5")).to.be
+        .true;
+      // "f6" pushed to remote
+      expect(result.remoteChanges.insertions.some((i) => i.title === "f6")).to
+        .be.true;
     });
   });
 
@@ -699,11 +782,12 @@ describe("3-State Sync Algorithm", () => {
   // ============================================
 
   describe("Move vs Move", () => {
-    it("Case 18: A moves X to F2, B moves X to F3 -> conflict", () => {
+    it("Case 18: A moves X to F2, B moves X to F3 -> no conflict, both X exist", () => {
       // Initial: X in F1
-      // A moves X to F2, syncs -> remote has X in F2 + tombstone for X at F1
-      // B moves X to F3, syncs -> local has X in F3 + tombstone for X at F1
-      // conflict: moved different places
+      // A moves X to F2 (creates tombstone for X at F1), syncs
+      // B moves X to F3 (creates tombstone for X at F1), syncs
+      // With 3-of-3: X at F1, X at F2, X at F3 are all DIFFERENT (path differs)
+      // Result: X at F1 deleted, X at F2 inserted locally, X at F3 pushed to remote
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -723,7 +807,7 @@ describe("3-State Sync Algorithm", () => {
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "F3", path: ["Toolbar"], index: 2 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F3"], index: 0 },
-        movedXTombstone, // tombstone for X at old location
+        movedXTombstone, // tombstone for X at F1
       ];
       const currentRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -746,8 +830,20 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // Both moved X to different folders - conflict
-      expect(result.conflicts).to.have.lengthOf(1);
+      // With 3-of-3: no conflict, X exists in both F2 and F3
+      expect(result.conflicts).to.be.empty;
+      // X at F2 inserted locally
+      expect(
+        result.localChanges.insertions.some(
+          (i) => i.title === "X" && i.path.includes("F2"),
+        ),
+      ).to.be.true;
+      // X at F3 pushed to remote
+      expect(
+        result.remoteChanges.insertions.some(
+          (i) => i.title === "X" && i.path.includes("F3"),
+        ),
+      ).to.be.true;
     });
 
     it("Case 19: Both move X to F2 -> no change needed", () => {
@@ -847,11 +943,12 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
 
-    it("Case 21: A deletes F with Y, B adds Z to F -> NOT conflict, Z pushed, F recreated, Y deleted locally", () => {
+    it("Case 21: A deletes F with Y, B adds Z to F -> NOT conflict, Z pushed, Y deleted, F survives", () => {
       // Initial: F with Y
-      // A deletes F, syncs -> remote has tombstones F, Y
+      // A deletes F and Y, syncs -> remote has tombstones F, Y
       // B adds Z to F, syncs -> NOT a conflict
-      // Result: Z pushed to remote, F recreated, Y deleted locally
+      // With protectFoldersWithContent: F survives because Z is inside it
+      // Result: Z pushed to remote, Y deleted locally, F survives (has content)
 
       const oldRemoteState = [
         { title: "F", path: ["Toolbar"], index: 0 },
@@ -892,25 +989,27 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // No folder conflict - new content Z means folder survives
+      // No conflict
       expect(folderConflicts).to.be.empty;
       expect(result.conflicts).to.be.empty;
 
       // Z pushed to remote
       expect(result.remoteChanges.insertions.some((i) => i.title === "Z")).to.be
         .true;
-      // F and Y deleted locally (remote deleted them, background.js recreates F on remote when pushing Z)
-      expect(result.localChanges.deletions.some((d) => d.title === "F")).to.be
-        .true;
+      // Y deleted locally (has tombstone)
       expect(result.localChanges.deletions.some((d) => d.title === "Y")).to.be
         .true;
+      // F NOT deleted (has content Z inside)
+      expect(result.localChanges.deletions.some((d) => d.title === "F")).to.be
+        .false;
     });
 
-    it("Case 22: A deletes empty F, B adds Y to F -> NOT conflict, Y pushed, F recreated", () => {
+    it("Case 22: A deletes empty F, B adds Y to F -> NOT conflict, Y pushed, F survives", () => {
       // Initial: F (empty)
       // A deletes F, syncs -> remote has tombstone F
       // B adds Y to F, syncs -> NOT a conflict
-      // Result: Y pushed to remote, F deleted locally (background.js recreates F on remote when pushing Y)
+      // With protectFoldersWithContent: F survives because Y is inside it
+      // Result: Y pushed to remote, F NOT deleted (has content)
 
       const oldRemoteState = [{ title: "F", path: ["Toolbar"], index: 0 }];
       const currentLocalState = [
@@ -939,16 +1038,16 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // No folder conflict - new content Y means folder survives
+      // No conflict
       expect(folderConflicts).to.be.empty;
       expect(result.conflicts).to.be.empty;
 
       // Y pushed to remote
       expect(result.remoteChanges.insertions.some((i) => i.title === "Y")).to.be
         .true;
-      // F deleted locally (background.js recreates F on remote when pushing Y)
+      // F NOT deleted (has content Y inside)
       expect(result.localChanges.deletions.some((d) => d.title === "F")).to.be
-        .true;
+        .false;
     });
 
     it("Case 23: A deletes empty F, B syncs -> B deletes F", () => {
@@ -1180,11 +1279,12 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
 
-    it("Case 28: A deletes F1 containing F2/X, B adds Y to F2 -> NOT conflict, Y pushed, folders recreated", () => {
+    it("Case 28: A deletes F1 containing F2/X, B adds Y to F2 -> NOT conflict, Y pushed, X deleted, folders survive", () => {
       // Initial: F1/F2/X
       // A deletes F1, syncs -> remote has tombstones F1, F2, X
       // B adds Y to F2, syncs -> NOT a conflict
-      // Result: Y pushed to remote, F1/F2/X deleted locally (background.js recreates F1, F2 on remote when pushing Y)
+      // With protectFoldersWithContent: F1 and F2 survive because Y is inside
+      // Result: Y pushed to remote, X deleted locally, F1 and F2 survive (have content)
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -1249,20 +1349,21 @@ describe("3-State Sync Algorithm", () => {
         currentRemoteState,
       );
 
-      // No folder conflict - new content Y means folders survive
+      // No conflict
       expect(folderConflicts).to.be.empty;
       expect(result.conflicts).to.be.empty;
 
       // Y pushed to remote
       expect(result.remoteChanges.insertions.some((i) => i.title === "Y")).to.be
         .true;
-      // F1, F2, X deleted locally (remote deleted them)
-      expect(result.localChanges.deletions.some((d) => d.title === "F1")).to.be
-        .true;
-      expect(result.localChanges.deletions.some((d) => d.title === "F2")).to.be
-        .true;
+      // X deleted locally (has tombstone)
       expect(result.localChanges.deletions.some((d) => d.title === "X")).to.be
         .true;
+      // F1 and F2 NOT deleted (have content Y inside)
+      expect(result.localChanges.deletions.some((d) => d.title === "F1")).to.be
+        .false;
+      expect(result.localChanges.deletions.some((d) => d.title === "F2")).to.be
+        .false;
     });
   });
 
