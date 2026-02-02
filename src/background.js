@@ -347,7 +347,20 @@ async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
     remoteChanges.updates.length > 0 ||
     allConflicts.length > 0;
 
+  // Even if no sync changes, filter out stale tombstones (revived items)
   if (!hasChanges) {
+    const remoteActive = getActive(currentRemoteState);
+    const remoteTombstones = getTombstones(currentRemoteState);
+    const filteredTombstones = remoteTombstones.filter((tombstone) =>
+      shouldKeepTombstone(tombstone, localBookmarks),
+    );
+
+    // If tombstones changed, update remote (keep remote active, update tombstones only)
+    if (filteredTombstones.length !== remoteTombstones.length) {
+      const newRemoteData = [...remoteActive, ...filteredTombstones];
+      await updateWebDAV(url, username, password, newRemoteData);
+      await saveLocalTombstones(filteredTombstones);
+    }
     return;
   }
 
@@ -435,11 +448,21 @@ async function handleSync(config) {
   // Get final local state
   const finalBookmarks = await getLocalBookmarksSnapshot();
 
-  // Get tombstones from newState
+  // Get tombstones from newState and existing remote
   const newStateTombstones = getTombstones(pendingNewState || []);
+  const existingRemoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Filter out tombstones for items that now exist
-  const filteredTombstones = newStateTombstones.filter((tombstone) =>
+  // Merge tombstones: keep all existing remote tombstones + new ones from sync
+  const allTombstones = [...existingRemoteTombstones];
+  for (const newTomb of newStateTombstones) {
+    const exists = allTombstones.some((t) => bookmarksEqual(newTomb, t));
+    if (!exists) {
+      allTombstones.push(newTomb);
+    }
+  }
+
+  // Filter out tombstones for items that now exist (revived)
+  const filteredTombstones = allTombstones.filter((tombstone) =>
     shouldKeepTombstone(tombstone, finalBookmarks),
   );
 
