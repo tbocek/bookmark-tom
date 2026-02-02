@@ -39,16 +39,13 @@ function shouldKeepTombstone(tombstone, activeBookmarks) {
   // For folders: check if any bookmark has path inside this folder
   if (!tombstone.url) {
     const folderPath = [...tombstone.path, tombstone.title];
-    const hasContent = activeBookmarks.some((bm) => {
-      if (bm.path.length >= folderPath.length) {
-        return folderPath.every((segment, i) => bm.path[i] === segment);
-      }
-      return false;
-    });
+    const hasContent = activeBookmarks.some((bm) =>
+      pathStartsWith(bm.path, folderPath),
+    );
     if (hasContent) return false; // folder has content, remove tombstone
   }
 
-  // For bookmarks (and folders without content): check exact 4-of-4 match
+  // For bookmarks (and folders without content): check if revived (3-of-3 match)
   const revived = activeBookmarks.some((bm) => bookmarksEqual(tombstone, bm));
   if (revived) return false; // bookmark revived, remove tombstone
 
@@ -127,18 +124,12 @@ async function removeDuplicateBookmarks(bookmarkId, recursive = true) {
           // For folders: merge contents before removing
           const dupFolderPath = await getBookmarkPath(dup.id);
 
+          // Create tombstones for all contents recursively (before moving)
+          await createTombstonesForFolderContents(dup.id, dupFolderPath);
+
+          // Move direct children to kept folder
           const dupChildren = await browser.bookmarks.getChildren(dup.id);
           for (const child of dupChildren) {
-            // Create tombstone for old location before moving
-            const oldChildPath = [...dupFolderPath];
-            const tombstone = createTombstone({
-              title: child.title,
-              url: child.url,
-              path: oldChildPath,
-              index: child.index,
-            });
-            await addLocalTombstoneDirectly(tombstone, bookmarksEqual);
-
             await browser.bookmarks.move(child.id, { parentId: bookmarkId });
           }
 
@@ -265,15 +256,17 @@ async function closeConfirmationWindow() {
   previousTabId = null;
 }
 
+/**
+ * Common cleanup after sync operations complete
+ */
+async function finishSync() {
+  await initializeBookmarkIdMap();
+  await closeConfirmationWindow();
+}
+
 //************************** SYNC ORCHESTRATION **************************
 
-async function syncAllBookmarks(
-  url,
-  username,
-  password,
-  localMaster,
-  fromBackgroundTimer,
-) {
+async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
   // Check if configured
   if (!url) {
     await browser.storage.local.set({
@@ -506,13 +499,7 @@ async function handleSync(config) {
   // Save lastSyncedState
   await saveLastSyncedState(finalBookmarks);
 
-  // Clear change log
-  await clearChangeLog();
-
-  // Reinitialize bookmark ID map
-  await initializeBookmarkIdMap();
-
-  await closeConfirmationWindow();
+  await finishSync();
 }
 
 async function handleConflictLocal(config) {
@@ -535,9 +522,7 @@ async function handleConflictLocal(config) {
 
   await saveLocalTombstones(filteredTombstones);
   await saveLastSyncedState(localBookmarks);
-  await clearChangeLog();
-  await initializeBookmarkIdMap();
-  await closeConfirmationWindow();
+  await finishSync();
 }
 
 async function handleConflictRemote(config) {
@@ -548,11 +533,11 @@ async function handleConflictRemote(config) {
   const remoteActive = getActive(remoteBookmarks || []);
   const remoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Calculate what to delete and insert locally (4-of-4 exact matching)
+  // Calculate what to delete and insert locally (3-of-3 matching)
   const toDelete = [];
   const toInsert = [];
 
-  // Find local bookmarks not in remote (exact match) -> delete
+  // Find local bookmarks not in remote -> delete
   for (const local of localBookmarks) {
     const remoteMatch = findExact(local, remoteActive);
     if (!remoteMatch) {
@@ -560,7 +545,7 @@ async function handleConflictRemote(config) {
     }
   }
 
-  // Find remote bookmarks not in local (exact match) -> insert
+  // Find remote bookmarks not in local -> insert
   for (const remote of remoteActive) {
     const localMatch = findExact(remote, localBookmarks);
     if (!localMatch) {
@@ -586,20 +571,12 @@ async function handleConflictRemote(config) {
 
   await saveLocalTombstones(filteredTombstones);
   await saveLastSyncedState(finalBookmarks);
-  await clearChangeLog();
-  await initializeBookmarkIdMap();
-  await closeConfirmationWindow();
+  await finishSync();
 }
 
 async function handleSyncAllBookmarks(config, sendResponse) {
   try {
-    await syncAllBookmarks(
-      config.url,
-      config.username,
-      config.password,
-      false,
-      false,
-    );
+    await syncAllBookmarks(config.url, config.username, config.password, false);
     sendResponse({ success: true });
   } catch (error) {
     sendResponse({ success: false, error: error });
@@ -679,9 +656,6 @@ browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
   // Create tombstone for old state if title or url changed
   // With 3-of-3 matching, a title/url change creates a "different" bookmark
   if (oldBookmark) {
-    const newTitle = changeInfo.title ?? oldBookmark.title;
-    const newUrl = changeInfo.url ?? oldBookmark.url;
-
     const titleChanged =
       changeInfo.title !== undefined && changeInfo.title !== oldBookmark.title;
     const urlChanged =
@@ -701,14 +675,14 @@ browser.bookmarks.onChanged.addListener(async (id, changeInfo) => {
 
   // Check for duplicates after title/url change
   await removeDuplicateBookmarks(id);
-  await debounceBookmarkSync(true);
+  await debounceBookmarkSync();
 });
 
 browser.bookmarks.onCreated.addListener(async (id, bookmark) => {
   await recordChange("created", id, bookmark, getBookmarkPath, syncInProgress);
   // Check for duplicates after creating
   await removeDuplicateBookmarks(id);
-  await debounceBookmarkSync(true);
+  await debounceBookmarkSync();
 });
 
 browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
@@ -736,7 +710,7 @@ browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
   await recordChange("moved", id, moveInfo, getBookmarkPath, syncInProgress);
   // Check for duplicates after moving to new folder
   await removeDuplicateBookmarks(id);
-  await debounceBookmarkSync(true);
+  await debounceBookmarkSync();
 });
 
 browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
@@ -760,7 +734,7 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
     "Bookmarks Menu",
   ];
   if (parentPath.length === 0 && rootFolders.includes(node.title)) {
-    await debounceBookmarkSync(true);
+    await debounceBookmarkSync();
     return;
   }
 
@@ -775,29 +749,24 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
     const folderPath = [...parentPath, node.title];
 
     for (const [bmId, bmData] of Object.entries(bookmarkIdMapSnapshot)) {
-      if (bmData.path && bmData.path.length >= folderPath.length) {
-        const pathMatches = folderPath.every(
-          (segment, i) => bmData.path[i] === segment,
-        );
-        if (pathMatches) {
-          if (bmData.path.length === 0 && rootFolders.includes(bmData.title)) {
-            continue;
-          }
-          await addLocalTombstone(
-            {
-              title: bmData.title,
-              url: bmData.url,
-              path: bmData.path,
-            },
-            createTombstone,
-            bookmarksEqual,
-          );
+      if (pathStartsWith(bmData.path, folderPath)) {
+        if (bmData.path.length === 0 && rootFolders.includes(bmData.title)) {
+          continue;
         }
+        await addLocalTombstone(
+          {
+            title: bmData.title,
+            url: bmData.url,
+            path: bmData.path,
+          },
+          createTombstone,
+          bookmarksEqual,
+        );
       }
     }
   }
 
-  await debounceBookmarkSync(true);
+  await debounceBookmarkSync();
 });
 
 //************************** OTHER LISTENERS **************************
@@ -865,7 +834,7 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
 
 //************************** DEBOUNCE **************************
 
-async function debounceBookmarkSync(localMaster) {
+async function debounceBookmarkSync() {
   if (debounceTimer) {
     clearTimeout(debounceTimer);
   }
@@ -873,13 +842,7 @@ async function debounceBookmarkSync(localMaster) {
   const config = await loadConfig();
 
   debounceTimer = setTimeout(async () => {
-    await syncAllBookmarks(
-      config.url,
-      config.username,
-      config.password,
-      localMaster,
-      false,
-    );
+    await syncAllBookmarks(config.url, config.username, config.password, false);
   }, 1000);
 }
 
@@ -909,25 +872,13 @@ async function debounceBookmarkSync(localMaster) {
       }
     }
 
-    await syncAllBookmarks(
-      config.url,
-      config.username,
-      config.password,
-      false,
-      true,
-    );
+    await syncAllBookmarks(config.url, config.username, config.password, true);
 
     const checkInterval = config.checkInterval || 5;
     setInterval(
       async () => {
         const cfg = await loadConfig();
-        await syncAllBookmarks(
-          cfg.url,
-          cfg.username,
-          cfg.password,
-          false,
-          true,
-        );
+        await syncAllBookmarks(cfg.url, cfg.username, cfg.password, true);
       },
       checkInterval * 60 * 1000,
     );

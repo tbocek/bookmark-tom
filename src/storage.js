@@ -45,30 +45,13 @@ async function initializeBookmarkIdMap() {
   await saveBookmarkIdMap(bookmarkIdMap);
 }
 
-// ============================================
-// CHANGE LOG
-// ============================================
-
-async function getChangeLog() {
-  const storage = await browser.storage.local.get(["changeLog"]);
-  return storage.changeLog || [];
-}
-
-async function saveChangeLog(changeLog) {
-  await browser.storage.local.set({ changeLog });
-}
-
-async function clearChangeLog() {
-  await browser.storage.local.set({ changeLog: [] });
-}
-
 /**
- * Record a local change
+ * Update bookmarkIdMap when a local change occurs
  * @param {string} type - 'created', 'changed', 'moved', 'removed'
  * @param {string} bookmarkId - Browser bookmark ID
  * @param {Object} info - Change info from browser event
  * @param {Function} getBookmarkPath - Function to get bookmark path from parentId
- * @param {boolean} syncInProgress - Whether sync is in progress (skip recording if true)
+ * @param {boolean} syncInProgress - Whether sync is in progress (skip if true)
  */
 async function recordChange(
   type,
@@ -82,51 +65,37 @@ async function recordChange(
   }
 
   const bookmarkIdMap = await getBookmarkIdMap();
-  const changeLog = await getChangeLog();
-
-  const entry = {
-    id: crypto.randomUUID(),
-    timestamp: Date.now(),
-    type,
-    bookmarkId,
-    bookmark: null,
-    oldValues: null,
-  };
 
   switch (type) {
     case "created": {
       const path = await getBookmarkPath(info.parentId);
-      entry.bookmark = {
+      bookmarkIdMap[bookmarkId] = {
         title: info.title,
         path: path,
         url: info.url,
         index: info.index,
       };
-      bookmarkIdMap[bookmarkId] = entry.bookmark;
       break;
     }
 
     case "changed": {
       const oldBookmark = bookmarkIdMap[bookmarkId];
       if (oldBookmark) {
-        entry.oldValues = { ...oldBookmark };
-        entry.bookmark = {
+        bookmarkIdMap[bookmarkId] = {
           ...oldBookmark,
           title: info.title ?? oldBookmark.title,
           url: info.url ?? oldBookmark.url,
         };
-        bookmarkIdMap[bookmarkId] = entry.bookmark;
       } else {
         try {
           const [bm] = await browser.bookmarks.get(bookmarkId);
           const path = await getBookmarkPath(bm.parentId);
-          entry.bookmark = {
+          bookmarkIdMap[bookmarkId] = {
             title: bm.title,
             path: path,
             url: bm.url,
             index: bm.index,
           };
-          bookmarkIdMap[bookmarkId] = entry.bookmark;
         } catch (e) {
           // Can't get bookmark info
         }
@@ -137,26 +106,21 @@ async function recordChange(
     case "moved": {
       const oldBm = bookmarkIdMap[bookmarkId];
       const newPath = await getBookmarkPath(info.parentId);
-      const oldPath = await getBookmarkPath(info.oldParentId);
       if (oldBm) {
-        entry.oldValues = { path: oldPath, index: info.oldIndex };
-        entry.bookmark = {
+        bookmarkIdMap[bookmarkId] = {
           ...oldBm,
           path: newPath,
           index: info.index,
         };
-        bookmarkIdMap[bookmarkId] = entry.bookmark;
       } else {
         try {
           const [bm] = await browser.bookmarks.get(bookmarkId);
-          entry.bookmark = {
+          bookmarkIdMap[bookmarkId] = {
             title: bm.title,
             path: newPath,
             url: bm.url,
             index: info.index,
           };
-          entry.oldValues = { path: oldPath, index: info.oldIndex };
-          bookmarkIdMap[bookmarkId] = entry.bookmark;
         } catch (e) {
           // Can't get bookmark info
         }
@@ -165,27 +129,11 @@ async function recordChange(
     }
 
     case "removed": {
-      const oldBm = bookmarkIdMap[bookmarkId];
-      if (oldBm) {
-        entry.bookmark = oldBm;
-      } else {
-        const path = await getBookmarkPath(info.parentId);
-        entry.bookmark = {
-          title: info.node.title,
-          path: path,
-          url: info.node.url,
-          index: info.index,
-        };
-      }
       delete bookmarkIdMap[bookmarkId];
       break;
     }
   }
 
-  if (entry.bookmark) {
-    changeLog.push(entry);
-    await saveChangeLog(changeLog);
-  }
   await saveBookmarkIdMap(bookmarkIdMap);
 }
 
