@@ -162,30 +162,10 @@ function diffStates(current, target, debugLabel = "") {
   const currentKeys = new Set(currentActive.map(bookmarkKey));
   const targetKeys = new Set(targetActive.map(bookmarkKey));
 
-  // DEBUG
-  const debugTitles = ["SVG.now", "Virtual Reality", "FOSDEM", "Parcel"];
-  const isDebugItem = (bm) =>
-    debugTitles.some((t) => (bm.title || "").includes(t));
-
   // Items in target but not in current → insertions
   for (const tgt of targetActive) {
     if (!currentKeys.has(bookmarkKey(tgt))) {
       insertions.push(tgt);
-      if (isDebugItem(tgt)) {
-        console.log(
-          `[SYNC DEBUG] ${debugLabel} INSERTION: "${tgt.title}" index=${tgt.index}`,
-        );
-        console.log(`[SYNC DEBUG]   Key: ${bookmarkKey(tgt)}`);
-        const match3of4InCurrent = currentActive.find((c) => match3of4(c, tgt));
-        if (match3of4InCurrent) {
-          console.log(
-            `[SYNC DEBUG]   Has 3-of-4 match in current: index=${match3of4InCurrent.index}`,
-          );
-          console.log(
-            `[SYNC DEBUG]   Current key: ${bookmarkKey(match3of4InCurrent)}`,
-          );
-        }
-      }
     }
   }
 
@@ -193,28 +173,6 @@ function diffStates(current, target, debugLabel = "") {
   for (const curr of currentActive) {
     if (!targetKeys.has(bookmarkKey(curr))) {
       deletions.push(curr);
-      if (isDebugItem(curr)) {
-        console.log(
-          `[SYNC DEBUG] ${debugLabel} DELETION: "${curr.title}" index=${curr.index}`,
-        );
-        console.log(`[SYNC DEBUG]   Key: ${bookmarkKey(curr)}`);
-        const match3of4InTarget = targetActive.find((t) => match3of4(curr, t));
-        if (match3of4InTarget) {
-          console.log(
-            `[SYNC DEBUG]   Has 3-of-4 match in target: index=${match3of4InTarget.index}`,
-          );
-          console.log(
-            `[SYNC DEBUG]   Target key: ${bookmarkKey(match3of4InTarget)}`,
-          );
-          console.log(
-            `[SYNC DEBUG]   --> This should be an UPDATE, not delete+insert!`,
-          );
-        } else {
-          console.log(
-            `[SYNC DEBUG]   NO 3-of-4 match in target - truly missing`,
-          );
-        }
-      }
     }
   }
 
@@ -445,21 +403,11 @@ function mergeStates(oldState, localState, remoteState) {
   const addedKeys = new Set();
 
   // Process old bookmarks
-  // DEBUG
-  const debugTitlesOld = ["SVG.now", "Virtual Reality", "FOSDEM", "Parcel"];
-  const isDebugItemOld = (bm) =>
-    debugTitlesOld.some((t) => (bm.title || "").includes(t));
-
   for (const old of oldActive) {
     const oldKey = bookmarkKey(old);
-    const isDebug = isDebugItemOld(old);
 
     // Skip if conflicted
     if (conflictedOldKeys.has(oldKey)) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG] Process old: "${old.title}" SKIPPED (conflicted)`,
-        );
       continue;
     }
 
@@ -483,22 +431,8 @@ function mergeStates(oldState, localState, remoteState) {
       bookmarksEqual(d.old, old),
     );
 
-    if (isDebug) {
-      console.log(
-        `[SYNC DEBUG] Process old: "${old.title}" index=${old.index}`,
-      );
-      console.log(
-        `[SYNC DEBUG]   localUnchanged=${!!localUnchanged} localModified=${!!localModified} localDeleted=${!!localDeleted}`,
-      );
-      console.log(
-        `[SYNC DEBUG]   remoteUnchanged=${!!remoteUnchanged} remoteModified=${!!remoteModified} remoteDeleted=${!!remoteDeleted}`,
-      );
-    }
-
     // Both unchanged
     if (localUnchanged && remoteUnchanged) {
-      if (isDebug)
-        console.log(`[SYNC DEBUG]   -> ADDED to newState (both unchanged)`);
       newState.push(old);
       addedKeys.add(bookmarkKey(old));
       continue;
@@ -506,17 +440,12 @@ function mergeStates(oldState, localState, remoteState) {
 
     // Both deleted
     if (localDeleted && remoteDeleted) {
-      if (isDebug) console.log(`[SYNC DEBUG]   -> TOMBSTONE (both deleted)`);
       newState.push(createTombstone(old));
       continue;
     }
 
     // Local unchanged, remote modified
     if (localUnchanged && remoteModified) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> ADDED remote version (local unchanged, remote modified)`,
-        );
       newState.push(remoteModified.current);
       addedKeys.add(bookmarkKey(remoteModified.current));
       continue;
@@ -524,20 +453,12 @@ function mergeStates(oldState, localState, remoteState) {
 
     // Local unchanged, remote deleted
     if (localUnchanged && remoteDeleted) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> TOMBSTONE (local unchanged, remote deleted)`,
-        );
       newState.push(createTombstone(old));
       continue;
     }
 
     // Local modified, remote unchanged
     if (localModified && remoteUnchanged) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> ADDED local version (local modified, remote unchanged)`,
-        );
       newState.push(localModified.current);
       addedKeys.add(bookmarkKey(localModified.current));
       continue;
@@ -545,30 +466,31 @@ function mergeStates(oldState, localState, remoteState) {
 
     // Local deleted, remote unchanged
     if (localDeleted && remoteUnchanged) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> TOMBSTONE (local deleted, remote unchanged)`,
-        );
       newState.push(createTombstone(old));
       continue;
     }
 
     // Local deleted, remote missing (no tombstone) -> push tombstone
     if (localDeleted && !remoteUnchanged && !remoteModified && !remoteDeleted) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> TOMBSTONE (local deleted, remote missing without tombstone)`,
-        );
       newState.push(createTombstone(old));
       continue;
     }
 
     // Remote deleted, local missing (no tombstone) -> keep tombstone
     if (remoteDeleted && !localUnchanged && !localModified && !localDeleted) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> TOMBSTONE (remote deleted, local missing without tombstone)`,
-        );
+      newState.push(createTombstone(old));
+      continue;
+    }
+
+    // Local modified (index-only), remote deleted -> deletion wins (not a conflict)
+    // Real conflicts (non-index changes) were already filtered in conflict detection
+    if (localModified && remoteDeleted) {
+      newState.push(createTombstone(old));
+      continue;
+    }
+
+    // Remote modified (index-only), local deleted -> deletion wins (not a conflict)
+    if (remoteModified && localDeleted) {
       newState.push(createTombstone(old));
       continue;
     }
@@ -603,9 +525,6 @@ function mergeStates(oldState, localState, remoteState) {
       continue;
     }
 
-    // Local modified, remote deleted OR local deleted, remote modified
-    // These are conflicts, already handled above
-
     // One side has it unchanged, other side missing (no tombstone) -> the side that has it wins
     if (
       localUnchanged &&
@@ -613,24 +532,33 @@ function mergeStates(oldState, localState, remoteState) {
       !remoteModified &&
       !remoteDeleted
     ) {
-      // Local has it, remote missing without tombstone -> local wins
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> ADDED local version (local unchanged, remote missing without tombstone)`,
-        );
       newState.push(old);
       addedKeys.add(bookmarkKey(old));
       continue;
     }
 
     if (remoteUnchanged && !localUnchanged && !localModified && !localDeleted) {
-      // Remote has it, local missing without tombstone -> remote wins
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> ADDED remote version (remote unchanged, local missing without tombstone)`,
-        );
       newState.push(old);
       addedKeys.add(bookmarkKey(old));
+      continue;
+    }
+
+    // Local modified, remote missing (no tombstone) -> local wins
+    if (
+      localModified &&
+      !remoteUnchanged &&
+      !remoteModified &&
+      !remoteDeleted
+    ) {
+      newState.push(localModified.current);
+      addedKeys.add(bookmarkKey(localModified.current));
+      continue;
+    }
+
+    // Remote modified, local missing (no tombstone) -> remote wins
+    if (remoteModified && !localUnchanged && !localModified && !localDeleted) {
+      newState.push(remoteModified.current);
+      addedKeys.add(bookmarkKey(remoteModified.current));
       continue;
     }
 
@@ -643,12 +571,19 @@ function mergeStates(oldState, localState, remoteState) {
       !remoteModified &&
       !remoteDeleted
     ) {
-      if (isDebug)
-        console.log(
-          `[SYNC DEBUG]   -> NOT ADDED (both sides missing without tombstone)`,
-        );
       continue;
     }
+
+    // SAFETY: If we reach here, no condition matched - this should not happen
+    // To prevent accidental data loss, keep the bookmark and log a warning
+    console.warn(
+      `[SYNC WARNING] Bookmark "${old.title}" did not match any merge condition. ` +
+        `Keeping it to prevent data loss. ` +
+        `local: unchanged=${!!localUnchanged} modified=${!!localModified} deleted=${!!localDeleted}, ` +
+        `remote: unchanged=${!!remoteUnchanged} modified=${!!remoteModified} deleted=${!!remoteDeleted}`,
+    );
+    newState.push(old);
+    addedKeys.add(bookmarkKey(old));
   }
 
   // Process local additions
@@ -726,26 +661,6 @@ function calcSyncChanges(
   currentLocalState,
   currentRemoteState,
 ) {
-  // DEBUG: Check for specific items in each state (active AND tombstones)
-  const debugTitles = ["SVG.now", "Virtual Reality", "Parcel"];
-  const findDebugItems = (list, label) => {
-    const items = (list || []).filter((bm) =>
-      debugTitles.some((t) => (bm.title || "").includes(t)),
-    );
-    const active = items.filter((bm) => !bm.deleted);
-    const tombstones = items.filter((bm) => bm.deleted);
-    console.log(`[SYNC DEBUG] ${label}:`);
-    console.log(`[SYNC DEBUG]   Active: ${active.length}`);
-    active.forEach((bm) => console.log(`[SYNC DEBUG]     - "${bm.title}"`));
-    console.log(`[SYNC DEBUG]   Tombstones: ${tombstones.length}`);
-    tombstones.forEach((bm) =>
-      console.log(`[SYNC DEBUG]     - "${bm.title}" (TOMBSTONE)`),
-    );
-  };
-  findDebugItems(oldRemoteState, "oldRemoteState (baseline)");
-  findDebugItems(currentLocalState, "currentLocalState (browser)");
-  findDebugItems(currentRemoteState, "currentRemoteState (WebDAV)");
-
   // Step 1: Merge to get newState
   const { newState, conflicts } = mergeStates(
     oldRemoteState || [],

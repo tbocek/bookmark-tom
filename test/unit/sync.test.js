@@ -184,6 +184,64 @@ describe("3-State Sync Algorithm", () => {
   });
 
   // ============================================
+  // SINGLE-SIDED ADD (not in baseline)
+  // ============================================
+
+  describe("Single-Sided Add", () => {
+    it("Case 45: Local has new item, baseline and remote empty -> push to remote", () => {
+      // Initial: empty
+      // B adds Y locally (not synced yet)
+      // B syncs -> Y pushed to remote
+
+      const oldRemoteState = [];
+      const currentLocalState = [
+        { title: "Y", url: "http://y.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentRemoteState = [];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // Y should be pushed to remote
+      expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+      expect(result.remoteChanges.insertions[0].title).to.equal("Y");
+      // No local changes needed
+      expect(result.localChanges.insertions).to.be.empty;
+      expect(result.localChanges.deletions).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+    });
+
+    it("Case 46: Remote has new item, baseline and local empty -> insert locally", () => {
+      // Initial: empty
+      // A adds X, syncs -> remote has X
+      // B syncs -> B gets X
+
+      const oldRemoteState = [];
+      const currentLocalState = [];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should be inserted locally
+      expect(result.localChanges.insertions).to.have.lengthOf(1);
+      expect(result.localChanges.insertions[0].title).to.equal("X");
+      // No remote changes needed
+      expect(result.remoteChanges.insertions).to.be.empty;
+      expect(result.remoteChanges.deletions).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+    });
+  });
+
+  // ============================================
   // BOTH ADD
   // ============================================
 
@@ -434,8 +492,16 @@ describe("3-State Sync Algorithm", () => {
       const oldRemoteState = [
         { title: "X", url: "http://x.com", path: ["Toolbar", "A"], index: 0 },
       ];
+      // B moved X from /A to /B - use calcMove to generate tombstone
+      const movedXTombstone = calcMove({
+        title: "X",
+        url: "http://x.com",
+        path: ["Toolbar", "A"],
+        index: 0,
+      });
       const currentLocalState = [
         { title: "X", url: "http://x.com", path: ["Toolbar", "B"], index: 0 },
+        movedXTombstone, // tombstone for X at old location
       ];
       const currentRemoteState = [
         {
@@ -469,10 +535,18 @@ describe("3-State Sync Algorithm", () => {
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F1"], index: 0 },
       ];
+      // B moved X from F1 to F2 - use calcMove to generate tombstone
+      const movedXTombstone = calcMove({
+        title: "X",
+        url: "http://x.com",
+        path: ["Toolbar", "F1"],
+        index: 0,
+      });
       const currentLocalState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F2"], index: 0 },
+        movedXTombstone, // tombstone for X at old location
       ];
       const currentRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -627,8 +701,9 @@ describe("3-State Sync Algorithm", () => {
   describe("Move vs Move", () => {
     it("Case 18: A moves X to F2, B moves X to F3 -> conflict", () => {
       // Initial: X in F1
-      // A moves X to F2, syncs -> remote has X in F2
-      // B moves X to F3, syncs -> conflict: moved different places
+      // A moves X to F2, syncs -> remote has X in F2 + tombstone for X at F1
+      // B moves X to F3, syncs -> local has X in F3 + tombstone for X at F1
+      // conflict: moved different places
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -636,11 +711,19 @@ describe("3-State Sync Algorithm", () => {
         { title: "F3", path: ["Toolbar"], index: 2 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F1"], index: 0 },
       ];
+      // B moved X from F1 to F3 - use calcMove to generate tombstone
+      const movedXTombstone = calcMove({
+        title: "X",
+        url: "http://x.com",
+        path: ["Toolbar", "F1"],
+        index: 0,
+      });
       const currentLocalState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "F3", path: ["Toolbar"], index: 2 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F3"], index: 0 },
+        movedXTombstone, // tombstone for X at old location
       ];
       const currentRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -670,17 +753,25 @@ describe("3-State Sync Algorithm", () => {
     it("Case 19: Both move X to F2 -> no change needed", () => {
       // Initial: X in F1
       // A moves X to F2, syncs -> remote has X in F2
-      // B moves X to F2, syncs -> already in F2
+      // B moves X to F2, syncs -> local has X in F2 + tombstone for X at F1, already in F2
 
       const oldRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F1"], index: 0 },
       ];
+      // B moved X from F1 to F2 - use calcMove to generate tombstone
+      const movedXTombstone = calcMove({
+        title: "X",
+        url: "http://x.com",
+        path: ["Toolbar", "F1"],
+        index: 0,
+      });
       const currentLocalState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
         { title: "F2", path: ["Toolbar"], index: 1 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F2"], index: 0 },
+        movedXTombstone, // tombstone for X at old location
       ];
       const currentRemoteState = [
         { title: "F1", path: ["Toolbar"], index: 0 },
@@ -1535,7 +1626,7 @@ describe("3-State Sync Algorithm", () => {
 
     it("Case 38: A moves d into F, B deletes F (d index shifts) -> NOT conflict, d stays in F", () => {
       // Initial: F with c inside, d at root
-      // A moves d into F, syncs
+      // A moves d into F, syncs -> local has d in F + tombstone for d at old location
       // B deletes F (and c), syncs -> d index shifts as side effect
       // A syncs -> NOT a conflict
       // Result: d stays in F (A's move wins), F survives, c deleted
@@ -1545,11 +1636,19 @@ describe("3-State Sync Algorithm", () => {
         { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
         { title: "d", url: "http://d/", path: ["Toolbar"], index: 11 },
       ];
+      // A moved d from Toolbar to Toolbar/F - use calcMove to generate tombstone
+      const movedDTombstone = calcMove({
+        title: "d",
+        url: "http://d/",
+        path: ["Toolbar"],
+        index: 11,
+      });
       const currentLocalState = [
         // A moved d into F
         { title: "F", path: ["Toolbar"], index: 10 },
         { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
         { title: "d", url: "http://d/", path: ["Toolbar", "F"], index: 1 },
+        movedDTombstone, // tombstone for d at old location
       ];
       const currentRemoteState = [
         // B deleted F and c, d shifted to index 10
