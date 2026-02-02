@@ -725,7 +725,7 @@ browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
     index: moveInfo.oldIndex,
   };
   const tombstone = calcMove(oldBookmark);
-  await addLocalTombstoneDirectly(tombstone, match3of4);
+  await addLocalTombstoneDirectly(tombstone, bookmarksEqual);
 
   // If moving a folder, create tombstones for all children at their old paths
   if (!bookmark.url) {
@@ -769,7 +769,7 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
     url: node.url,
     path: parentPath,
   };
-  await addLocalTombstone(bookmark, createTombstone, match3of4);
+  await addLocalTombstone(bookmark, createTombstone, bookmarksEqual);
 
   if (node.type === "folder") {
     const folderPath = [...parentPath, node.title];
@@ -790,7 +790,7 @@ browser.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
               path: bmData.path,
             },
             createTombstone,
-            match3of4,
+            bookmarksEqual,
           );
         }
       }
