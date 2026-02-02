@@ -526,11 +526,22 @@ async function handleSync(config) {
 }
 
 async function handleConflictLocal(config) {
+  const { remoteBookmarks } = confirmationData || {};
   const localBookmarks = await getLocalBookmarksSnapshot();
   const localTombstones = await getLocalTombstones();
+  const remoteTombstones = getTombstones(remoteBookmarks || []);
 
-  // Filter out tombstones for items that exist locally
-  const filteredTombstones = localTombstones.filter((tombstone) =>
+  // Merge tombstones: local + remote tombstones not already in local
+  const allTombstones = [...localTombstones];
+  for (const remoteTomb of remoteTombstones) {
+    const exists = allTombstones.some((t) => bookmarksEqual(remoteTomb, t));
+    if (!exists) {
+      allTombstones.push(remoteTomb);
+    }
+  }
+
+  // Filter out tombstones for items that exist locally (local wins = they live)
+  const filteredTombstones = allTombstones.filter((tombstone) =>
     shouldKeepTombstone(tombstone, localBookmarks),
   );
 
