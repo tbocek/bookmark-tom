@@ -8,6 +8,7 @@ const moduleExports = eval(code);
 const calcSyncChanges = moduleExports.calcSyncChanges;
 const detectFolderConflicts = moduleExports.detectFolderConflicts;
 const createTombstone = moduleExports.createTombstone;
+const calcMove = moduleExports.calcMove;
 
 /**
  * 3-State Sync Tests
@@ -918,7 +919,7 @@ describe("3-State Sync Algorithm", () => {
 
     it("Case 25: A moves X into F, B deletes empty F -> NOT conflict, B gets F and X", () => {
       // Initial: X, F (empty)
-      // A moves X into F, syncs -> remote has X in F
+      // A moves X into F, syncs -> remote has X in F + tombstone for X at old location
       // B deletes empty F, syncs -> NOT a conflict
       // Result: B gets X inside F (background.js recreates F locally when inserting X)
 
@@ -936,9 +937,17 @@ describe("3-State Sync Algorithm", () => {
         },
         { title: "X", url: "http://x.com", path: ["Toolbar"], index: 1 },
       ];
+      // A moved X from Toolbar to Toolbar/F - use calcMove to generate tombstone
+      const movedXTombstone = calcMove({
+        title: "X",
+        url: "http://x.com",
+        path: ["Toolbar"],
+        index: 1,
+      });
       const currentRemoteState = [
         { title: "F", path: ["Toolbar"], index: 0 },
         { title: "X", url: "http://x.com", path: ["Toolbar", "F"], index: 0 },
+        movedXTombstone, // tombstone for X at old location
       ];
 
       const folderConflicts = detectFolderConflicts(
@@ -1360,7 +1369,7 @@ describe("3-State Sync Algorithm", () => {
     it("Case 36: B deletes empty F, A moves c into F -> NOT conflict, c moved into F locally", () => {
       // Initial: F (empty folder), c at root
       // B deletes F, syncs -> remote has F tombstone
-      // A moves c into F, syncs -> remote has c inside F
+      // A moves c into F, syncs -> remote has c inside F + tombstone for c at old location
       // B syncs -> NOT a conflict, c gets moved into F locally, F recreated
 
       const oldRemoteState = [
@@ -1379,10 +1388,18 @@ describe("3-State Sync Algorithm", () => {
         // c still at root
         { title: "c", url: "http://c/", path: ["Toolbar"], index: 1 },
       ];
+      // A moved c from Toolbar to Toolbar/F - use calcMove to generate tombstone
+      const movedCTombstone = calcMove({
+        title: "c",
+        url: "http://c/",
+        path: ["Toolbar"],
+        index: 1,
+      });
       const currentRemoteState = [
         // A kept F and moved c into it
         { title: "F", path: ["Toolbar"], index: 0 },
         { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+        movedCTombstone, // tombstone for c at old location
       ];
 
       const result = calcSyncChanges(
@@ -1419,7 +1436,7 @@ describe("3-State Sync Algorithm", () => {
       // Both F and c went through create/remove/create cycle (tombstones exist)
       // Initial: F (empty folder), c at root, old tombstones for both F and c
       // B deletes F, syncs -> remote has F tombstone
-      // A moves c into F, syncs -> remote has c inside F
+      // A moves c into F, syncs -> remote has c inside F + tombstone for c at old location
       // B syncs -> NOT a conflict, c gets moved into F locally
 
       const oldRemoteState = [
@@ -1472,10 +1489,18 @@ describe("3-State Sync Algorithm", () => {
           deletedAt: Date.now() - 100000,
         },
       ];
+      // A moved c from Toolbar to Toolbar/F - use calcMove to generate tombstone
+      const movedCTombstone = calcMove({
+        title: "c",
+        url: "http://c/",
+        path: ["Toolbar"],
+        index: 1,
+      });
       const currentRemoteState = [
         // A kept F and moved c into it
         { title: "F", path: ["Toolbar"], index: 0 },
         { title: "c", url: "http://c/", path: ["Toolbar", "F"], index: 0 },
+        movedCTombstone, // tombstone for c at old location (from A's move)
       ];
 
       const result = calcSyncChanges(
@@ -1651,6 +1676,169 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
       expect(result.localChanges.deletions).to.have.lengthOf(1);
       expect(result.localChanges.deletions[0].title).to.equal("X");
+    });
+  });
+
+  // ============================================
+  // MISSING WITHOUT TOMBSTONE (insert wins)
+  // ============================================
+
+  describe("Missing Without Tombstone", () => {
+    it("Case 40: Item in baseline and local, missing from remote (no tombstone) -> local wins, push to remote", () => {
+      // Initial: X exists
+      // Remote somehow lost X (no tombstone, just missing)
+      // Local still has X unchanged
+      // Result: X should be pushed to remote (insert wins over missing)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentRemoteState = []; // X is missing, no tombstone
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should be pushed to remote (not deleted locally)
+      expect(result.localChanges.deletions).to.be.empty;
+      expect(result.remoteChanges.insertions).to.have.lengthOf(1);
+      expect(result.remoteChanges.insertions[0].title).to.equal("X");
+      expect(result.conflicts).to.be.empty;
+    });
+
+    it("Case 41: Item in baseline and remote, missing from local (no tombstone) -> remote wins, insert locally", () => {
+      // Initial: X exists
+      // Local somehow lost X (no tombstone, just missing)
+      // Remote still has X unchanged
+      // Result: X should be inserted locally (insert wins over missing)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentLocalState = []; // X is missing, no tombstone
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should be inserted locally (not deleted from remote)
+      expect(result.localChanges.insertions).to.have.lengthOf(1);
+      expect(result.localChanges.insertions[0].title).to.equal("X");
+      expect(result.remoteChanges.deletions).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+    });
+
+    it("Case 42: Item in baseline, missing from both local and remote (no tombstones) -> stays deleted", () => {
+      // Initial: X exists
+      // Both sides somehow lost X (no tombstones)
+      // Result: X stays deleted (both sides agree it's gone)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentLocalState = []; // X is missing, no tombstone
+      const currentRemoteState = []; // X is missing, no tombstone
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should not appear anywhere (both sides lost it)
+      expect(result.localChanges.insertions).to.be.empty;
+      expect(result.localChanges.deletions).to.be.empty;
+      expect(result.remoteChanges.insertions).to.be.empty;
+      expect(result.remoteChanges.deletions).to.be.empty;
+      expect(result.conflicts).to.be.empty;
+    });
+
+    it("Case 43: Local has tombstone, remote just missing (no tombstone) -> delete wins", () => {
+      // Initial: X exists
+      // Local deleted X (has tombstone)
+      // Remote somehow lost X (no tombstone, just missing)
+      // Result: X stays deleted, tombstone in newState (will be pushed to remote)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentLocalState = [
+        {
+          title: "X",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+      const currentRemoteState = []; // X is missing, no tombstone
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should stay deleted - no insertions
+      expect(result.localChanges.insertions).to.be.empty;
+      expect(result.remoteChanges.insertions).to.be.empty;
+      // Tombstone should be in newState (background.js will push it to remote)
+      const tombstoneInNewState = result.newState.find(
+        (bm) => bm.title === "X" && bm.deleted === true,
+      );
+      expect(tombstoneInNewState).to.exist;
+      expect(result.conflicts).to.be.empty;
+    });
+
+    it("Case 44: Remote has tombstone, local just missing (no tombstone) -> delete wins", () => {
+      // Initial: X exists
+      // Remote deleted X (has tombstone)
+      // Local somehow lost X (no tombstone, just missing)
+      // Result: X stays deleted, tombstone preserved in newState
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+      ];
+      const currentLocalState = []; // X is missing, no tombstone
+      const currentRemoteState = [
+        {
+          title: "X",
+          url: "http://x.com",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // X should stay deleted - no insertions
+      expect(result.localChanges.insertions).to.be.empty;
+      expect(result.remoteChanges.insertions).to.be.empty;
+      // No deletions needed locally (X already missing)
+      expect(result.localChanges.deletions).to.be.empty;
+      // Tombstone should be preserved in newState
+      const tombstoneInNewState = result.newState.find(
+        (bm) => bm.title === "X" && bm.deleted === true,
+      );
+      expect(tombstoneInNewState).to.exist;
+      expect(result.conflicts).to.be.empty;
     });
   });
 

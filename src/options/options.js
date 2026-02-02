@@ -162,38 +162,21 @@ document.addEventListener("DOMContentLoaded", () => {
   clearTombstonesButton.addEventListener("click", async () => {
     const maxAgeDays = parseInt(tombstoneAgeSelect.value, 10);
 
-    // Clear local tombstones
-    const storage = await browser.storage.local.get(["tombstones"]);
-    const tombstones = storage.tombstones || [];
-
-    let remaining;
-    if (maxAgeDays === 0) {
-      // Clear all
-      remaining = [];
-    } else {
-      // Clear older than X days
-      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
-      const now = Date.now();
-      remaining = tombstones.filter((t) => now - t.deletedAt < maxAgeMs);
-    }
-
-    const clearedLocal = tombstones.length - remaining.length;
-    await browser.storage.local.set({ tombstones: remaining });
-    await updateTombstoneCount();
-
-    // Clear remote tombstones via background script
     try {
       const result = await browser.runtime.sendMessage({
         command: "clearRemoteTombstones",
         maxAgeDays: maxAgeDays,
       });
+      await updateTombstoneCount();
       if (result && result.success) {
-        statusDiv.innerText = `Cleared ${clearedLocal} local and ${result.clearedRemote} remote tombstone${result.clearedRemote !== 1 ? "s" : ""}.`;
+        const total =
+          result.clearedLocal + result.clearedBaseline + result.clearedRemote;
+        statusDiv.innerText = `Cleared ${total} tombstone${total !== 1 ? "s" : ""} (${result.clearedLocal} local, ${result.clearedBaseline} baseline, ${result.clearedRemote} remote).`;
       } else {
-        statusDiv.innerText = `Cleared ${clearedLocal} local tombstone${clearedLocal !== 1 ? "s" : ""}. Remote clear failed: ${result?.error || "unknown error"}`;
+        statusDiv.innerText = `Failed to clear tombstones: ${result?.error || "unknown error"}`;
       }
     } catch (error) {
-      statusDiv.innerText = `Cleared ${clearedLocal} local tombstone${clearedLocal !== 1 ? "s" : ""}. Remote clear failed: ${error.message}`;
+      statusDiv.innerText = `Failed to clear tombstones: ${error.message}`;
     }
   });
 });

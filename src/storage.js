@@ -218,6 +218,20 @@ async function addLocalTombstone(bookmark, createTombstone, match3of4) {
 }
 
 /**
+ * Add an already-created tombstone to local storage
+ * @param {Object} tombstone - The tombstone object (already created via calcMove/createTombstone)
+ * @param {Function} match3of4 - Function to check 3-of-4 match
+ */
+async function addLocalTombstoneDirectly(tombstone, match3of4) {
+  const tombstones = await getLocalTombstones();
+  const exists = tombstones.some((t) => match3of4(tombstone, t));
+  if (!exists) {
+    tombstones.push(tombstone);
+    await saveLocalTombstones(tombstones);
+  }
+}
+
+/**
  * Remove tombstones for a folder path (when folder is revived)
  * @param {Array} pathArray - Folder path
  * @param {Function} arraysEqual - Function to compare arrays

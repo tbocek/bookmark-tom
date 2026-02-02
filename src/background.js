@@ -521,45 +521,66 @@ async function handleSyncAllBookmarks(config, sendResponse) {
   }
 }
 
-async function handleClearRemoteTombstones(config, maxAgeDays) {
+async function handleClearTombstones(config, maxAgeDays) {
   try {
+    const maxAgeMs =
+      maxAgeDays === 0 ? Infinity : maxAgeDays * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const shouldClear = (t) =>
+      maxAgeDays === 0 || now - t.deletedAt >= maxAgeMs;
+
+    console.log("[CLEAR DEBUG] maxAgeDays:", maxAgeDays, "maxAgeMs:", maxAgeMs);
+
+    // 1. Clear from remote
+    let clearedRemote = 0;
     const remoteData = await fetchWebDAV(
       config.url,
       config.username,
       config.password,
     );
-
-    if (remoteData === null) {
-      return { success: true, clearedRemote: 0 };
-    }
-
-    const remoteBookmarks = getActive(remoteData);
-    const remoteTombstones = getTombstones(remoteData);
-
-    let remainingTombstones;
-    if (maxAgeDays === 0) {
-      remainingTombstones = [];
-    } else {
-      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
-      const now = Date.now();
-      remainingTombstones = remoteTombstones.filter(
-        (t) => now - t.deletedAt < maxAgeMs,
+    if (remoteData !== null) {
+      const remoteBookmarks = getActive(remoteData);
+      const remoteTombstones = getTombstones(remoteData);
+      console.log(
+        "[CLEAR DEBUG] Remote tombstones found:",
+        remoteTombstones.length,
       );
+      remoteTombstones.forEach((t) => {
+        console.log(
+          `[CLEAR DEBUG]   - "${t.title}" deletedAt=${t.deletedAt} shouldClear=${shouldClear(t)}`,
+        );
+      });
+      const remainingRemote = remoteTombstones.filter((t) => !shouldClear(t));
+      clearedRemote = remoteTombstones.length - remainingRemote.length;
+      await updateWebDAV(config.url, config.username, config.password, [
+        ...remoteBookmarks,
+        ...remainingRemote,
+      ]);
     }
 
-    const clearedRemote = remoteTombstones.length - remainingTombstones.length;
+    // 2. Clear from baseline
+    let clearedBaseline = 0;
+    const baseline = await getLastSyncedState();
+    if (baseline && baseline.length > 0) {
+      const baselineBookmarks = getActive(baseline);
+      const baselineTombstones = getTombstones(baseline);
+      const remainingBaseline = baselineTombstones.filter(
+        (t) => !shouldClear(t),
+      );
+      clearedBaseline = baselineTombstones.length - remainingBaseline.length;
+      await saveLastSyncedState([...baselineBookmarks, ...remainingBaseline]);
+    }
 
-    const newRemoteData = [...remoteBookmarks, ...remainingTombstones];
-    await updateWebDAV(
-      config.url,
-      config.username,
-      config.password,
-      newRemoteData,
-    );
+    // 3. Clear from local
+    let clearedLocal = 0;
+    const localTombstones = await getLocalTombstones();
+    const remainingLocal = localTombstones.filter((t) => !shouldClear(t));
+    clearedLocal = localTombstones.length - remainingLocal.length;
+    await saveLocalTombstones(remainingLocal);
 
-    return { success: true, clearedRemote };
+    return { success: true, clearedRemote, clearedBaseline, clearedLocal };
   } catch (error) {
-    console.error("Error clearing remote tombstones:", error);
+    console.error("Error clearing tombstones:", error);
     return { success: false, error: error.message };
   }
 }
@@ -588,14 +609,15 @@ browser.bookmarks.onMoved.addListener(async (id, moveInfo) => {
   const [bookmark] = await browser.bookmarks.get(id);
   const oldPath = await getBookmarkPath(moveInfo.oldParentId);
 
-  // Create tombstone for old location
+  // Create tombstone for old location using calcMove
   const oldBookmark = {
     title: bookmark.title,
     url: bookmark.url,
     path: oldPath,
     index: moveInfo.oldIndex,
   };
-  await addLocalTombstone(oldBookmark, createTombstone, match3of4);
+  const tombstone = calcMove(oldBookmark);
+  await addLocalTombstoneDirectly(tombstone, match3of4);
 
   await recordChange("moved", id, moveInfo, getBookmarkPath, syncInProgress);
   await debounceBookmarkSync(true);
@@ -703,7 +725,7 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     } else if (message.command === "syncAllBookmarks") {
       await handleSyncAllBookmarks(config, sendResponse);
     } else if (message.command === "clearRemoteTombstones") {
-      return await handleClearRemoteTombstones(config, message.maxAgeDays);
+      return await handleClearTombstones(config, message.maxAgeDays);
     } else if (message.command === "initializeFromRemote") {
       if (config.url) {
         const remoteData = await fetchWebDAV(
