@@ -100,9 +100,24 @@ document.addEventListener("DOMContentLoaded", async function () {
   });
   let { localChanges, remoteChanges, action, conflicts } = data || {};
 
+  // DEBUG: Set to true to log confirmation data
+  const debugConfirmation = false;
+  if (debugConfirmation) {
+    console.log("=== DEBUG: CONFIRMATION PAGE ===");
+    console.log("Raw data:", JSON.stringify(data));
+    console.log("localChanges BEFORE:", JSON.stringify(localChanges));
+    console.log("remoteChanges BEFORE:", JSON.stringify(remoteChanges));
+  }
+
   // Group 3-of-4 matching insert/delete pairs as updates for display
   localChanges = groupChangesForDisplay(localChanges || {});
   remoteChanges = groupChangesForDisplay(remoteChanges || {});
+
+  if (debugConfirmation) {
+    console.log("localChanges AFTER:", JSON.stringify(localChanges));
+    console.log("remoteChanges AFTER:", JSON.stringify(remoteChanges));
+    console.log("=== END DEBUG ===");
+  }
 
   const insertionsLocalDiv = document.getElementById("insertions-local");
   const insertionsRemoteDiv = document.getElementById("insertions-remote");

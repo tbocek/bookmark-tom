@@ -333,6 +333,58 @@ async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
     currentRemoteState,
   );
 
+  // Build debug log entry (will be saved after Proceed, shown in console now)
+  const buildDebugLog = () => {
+    const short = (str, len = 7) => {
+      if (!str) return "";
+      const s = str.replace(/^https?:\/\//, "");
+      if (s.length <= len * 2 + 2) return s;
+      return s.slice(0, len) + ".." + s.slice(-len);
+    };
+    const fmt = (b) => {
+      if (!b) return "null";
+      const del = b.deleted ? " [DEL]" : "";
+      return `${short(b.title, 10)}|${short(b.url)}|${b.path?.join("/")}@${b.index}${del}`;
+    };
+    const fmtArr = (arr) => (arr || []).map(fmt);
+    const fmtUpd = (u) =>
+      `${fmt(u.oldBookmark)} -> ${fmt(u.newBookmark)} (${u.changedAttribute})`;
+
+    return {
+      timestamp: new Date().toISOString(),
+      baseline: fmtArr(oldRemoteState),
+      local: fmtArr(currentLocalState),
+      remote: fmtArr(currentRemoteState),
+      newState: fmtArr(newState),
+      changes: {
+        localIns: fmtArr(localChanges.insertions),
+        localDel: fmtArr(localChanges.deletions),
+        localUpd: (localChanges.updates || []).map(fmtUpd),
+        remoteIns: fmtArr(remoteChanges.insertions),
+        remoteDel: fmtArr(remoteChanges.deletions),
+        remoteUpd: (remoteChanges.updates || []).map(fmtUpd),
+      },
+      conflicts: conflicts,
+    };
+  };
+  const pendingDebugLog = buildDebugLog();
+
+  // Log current sync to console
+  console.log(`=== SYNC ${pendingDebugLog.timestamp} ===`);
+  console.log("baseline:", pendingDebugLog.baseline);
+  console.log("local:", pendingDebugLog.local);
+  console.log("remote:", pendingDebugLog.remote);
+  console.log("newState:", pendingDebugLog.newState);
+  console.log("--- CHANGES ---");
+  console.log("local.ins:", pendingDebugLog.changes.localIns);
+  console.log("local.del:", pendingDebugLog.changes.localDel);
+  console.log("local.upd:", pendingDebugLog.changes.localUpd);
+  console.log("remote.ins:", pendingDebugLog.changes.remoteIns);
+  console.log("remote.del:", pendingDebugLog.changes.remoteDel);
+  console.log("remote.upd:", pendingDebugLog.changes.remoteUpd);
+  console.log("conflicts:", pendingDebugLog.conflicts);
+  console.log("=== END ===");
+
   // Note: folder conflicts (deleted folder + new content) are handled automatically
   // by the sync algorithm - folder survives if it has new content
   const allConflicts = conflicts;
@@ -372,8 +424,9 @@ async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
       remoteData,
       allConflicts,
     );
-    // Store newState for handlers (after displayConfirmationPage sets up confirmationData)
+    // Store newState and debug log for handlers (after displayConfirmationPage sets up confirmationData)
     confirmationData.pendingNewState = newState;
+    confirmationData.pendingDebugLog = pendingDebugLog;
   };
 
   if (fromBackgroundTimer) {
@@ -394,8 +447,18 @@ async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
 
 async function handleSync(config) {
   // Get data from in-memory confirmationData (not storage)
-  const { localChanges, remoteChanges, remoteBookmarks, pendingNewState } =
-    confirmationData || {};
+  const {
+    localChanges,
+    remoteChanges,
+    remoteBookmarks,
+    pendingNewState,
+    pendingDebugLog,
+  } = confirmationData || {};
+
+  // Save debug log now that user confirmed
+  if (pendingDebugLog) {
+    await saveDebugLog(pendingDebugLog);
+  }
 
   // Apply local changes (deletions and insertions)
   if (localChanges) {
@@ -858,6 +921,8 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         }
       }
       return { success: false };
+    } else if (message.command === "getDebugLogs") {
+      return await getDebugLogs();
     }
   } catch (error) {
     console.error("Error in message handler:", error);
@@ -888,22 +953,15 @@ async function debounceBookmarkSync() {
 
     const config = await loadConfig();
 
-    // On first run, initialize lastSyncedState from remote
+    // On first run, initialize lastSyncedState from current local bookmarks
+    // This ensures local state is preserved until user confirms sync changes
     const lastSyncedState = await getLastSyncedState();
     if (!lastSyncedState || lastSyncedState.length === 0) {
-      if (config.url) {
-        const remoteData = await fetchWebDAV(
-          config.url,
-          config.username,
-          config.password,
-        );
-        if (remoteData) {
-          await saveLastSyncedState(getActive(remoteData));
-          await browser.storage.local.set({
-            message: `Initialized from remote: ${formatSyncTime()}`,
-          });
-        }
-      }
+      const localBookmarks = await getLocalBookmarksSnapshot();
+      await saveLastSyncedState(localBookmarks);
+      await browser.storage.local.set({
+        message: `Initialized baseline from local: ${formatSyncTime()}`,
+      });
     }
 
     await syncAllBookmarks(config.url, config.username, config.password, true);

@@ -179,4 +179,38 @@ document.addEventListener("DOMContentLoaded", () => {
       statusDiv.innerText = `Failed to clear tombstones: ${error.message}`;
     }
   });
+
+  // Debug logs button
+  const showDebugLogsButton = document.getElementById("show-debug-logs-button");
+  showDebugLogsButton.addEventListener("click", async () => {
+    try {
+      const logs = await browser.runtime.sendMessage({
+        command: "getDebugLogs",
+      });
+      if (!logs || logs.length === 0) {
+        console.log("No debug logs available.");
+        statusDiv.innerText = "No debug logs available.";
+        return;
+      }
+      logs.forEach((log, i) => {
+        console.log(`=== SYNC LOG ${i + 1} - ${log.timestamp} ===`);
+        console.log("baseline:", log.baseline);
+        console.log("local:", log.local);
+        console.log("remote:", log.remote);
+        console.log("newState:", log.newState);
+        console.log("--- CHANGES ---");
+        console.log("local.ins:", log.changes.localIns);
+        console.log("local.del:", log.changes.localDel);
+        console.log("local.upd:", log.changes.localUpd);
+        console.log("remote.ins:", log.changes.remoteIns);
+        console.log("remote.del:", log.changes.remoteDel);
+        console.log("remote.upd:", log.changes.remoteUpd);
+        console.log("conflicts:", log.conflicts);
+        console.log("=== END LOG ===\n");
+      });
+      statusDiv.innerText = `Printed ${logs.length} log(s) to console.`;
+    } catch (error) {
+      statusDiv.innerText = `Failed to get debug logs: ${error.message}`;
+    }
+  });
 });

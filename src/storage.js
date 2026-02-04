@@ -213,8 +213,34 @@ async function getLastSyncedState() {
 }
 
 async function saveLastSyncedState(state) {
+  // DEBUG: Uncomment to trace baseline saves
+  // console.log("=== DEBUG: saveLastSyncedState ===");
+  // console.log("Stack:", new Error().stack);
+  // console.log("State:", JSON.stringify(state));
+
   await browser.storage.local.set({
     lastSyncedState: state,
     lastSyncTimestamp: Date.now(),
   });
+}
+
+// ============================================
+// DEBUG LOGS
+// ============================================
+
+const MAX_DEBUG_LOGS = 3;
+
+async function saveDebugLog(logEntry) {
+  const storage = await browser.storage.local.get(["debugLogs"]);
+  const logs = storage.debugLogs || [];
+  logs.unshift(logEntry); // Add to front
+  if (logs.length > MAX_DEBUG_LOGS) {
+    logs.length = MAX_DEBUG_LOGS; // Keep only last 3
+  }
+  await browser.storage.local.set({ debugLogs: logs });
+}
+
+async function getDebugLogs() {
+  const storage = await browser.storage.local.get(["debugLogs"]);
+  return storage.debugLogs || [];
 }

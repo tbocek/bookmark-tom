@@ -158,7 +158,7 @@ function findDifferingAttribute(a, b) {
 
 /**
  * Calculate changes needed to go from `current` to `target`
- * Uses exact 4-of-4 matching
+ * Uses 3-of-3 matching for identity, detects index changes as updates
  */
 function diffStates(current, target, debugLabel = "") {
   const insertions = [];
@@ -171,10 +171,28 @@ function diffStates(current, target, debugLabel = "") {
   const currentKeys = new Set(currentActive.map(bookmarkKey));
   const targetKeys = new Set(targetActive.map(bookmarkKey));
 
+  // Build a map of current bookmarks by key for quick lookup
+  const currentByKey = new Map();
+  for (const curr of currentActive) {
+    currentByKey.set(bookmarkKey(curr), curr);
+  }
+
   // Items in target but not in current -> insertions
+  // Items in both but with different index -> updates
   for (const tgt of targetActive) {
-    if (!currentKeys.has(bookmarkKey(tgt))) {
+    const key = bookmarkKey(tgt);
+    if (!currentKeys.has(key)) {
       insertions.push(tgt);
+    } else {
+      // Check if index differs
+      const curr = currentByKey.get(key);
+      if (curr.index !== tgt.index) {
+        updates.push({
+          oldBookmark: curr,
+          newBookmark: tgt,
+          changedAttribute: "index",
+        });
+      }
     }
   }
 
@@ -254,6 +272,7 @@ function mergeStates(oldState, localState, remoteState) {
   const localTombstones = getTombstones(localState);
   const remoteActive = getActive(remoteState);
   const remoteTombstones = getTombstones(remoteState);
+  const conflicts = [];
 
   // ----------------------------------------
   // PASS 1: Categorize changes on each side
@@ -295,9 +314,42 @@ function mergeStates(oldState, localState, remoteState) {
       bookmarksEqual(d.old, old),
     );
 
-    // Both unchanged
+    // Both unchanged (3-of-3 match) - check for index differences
     if (localUnchanged && remoteUnchanged) {
-      newState.push(old);
+      const localCurrent = localUnchanged.current;
+      const remoteCurrent = remoteUnchanged.current;
+      const baselineIndex = old.index;
+      const localIndex = localCurrent.index;
+      const remoteIndex = remoteCurrent.index;
+
+      // 3-way merge for index
+      if (localIndex === remoteIndex) {
+        // Same index on both sides - no conflict
+        newState.push({ ...old, index: localIndex });
+      } else if (
+        localIndex === baselineIndex &&
+        remoteIndex !== baselineIndex
+      ) {
+        // Only remote changed - remote wins
+        newState.push({ ...old, index: remoteIndex });
+      } else if (
+        remoteIndex === baselineIndex &&
+        localIndex !== baselineIndex
+      ) {
+        // Only local changed - local wins
+        newState.push({ ...old, index: localIndex });
+      } else {
+        // Both changed to different values - conflict
+        conflicts.push({
+          type: "index_conflict",
+          bookmark: old,
+          localVersion: localCurrent,
+          remoteVersion: remoteCurrent,
+          attribute: "index",
+        });
+        // For now, keep local version in newState (will be resolved by user)
+        newState.push({ ...old, index: localIndex });
+      }
       addedKeys.add(bookmarkKey(old));
       continue;
     }
@@ -416,7 +468,7 @@ function mergeStates(oldState, localState, remoteState) {
     addedKeys.add(key);
   }
 
-  return { newState, conflicts: [] };
+  return { newState, conflicts };
 }
 
 // ============================================
