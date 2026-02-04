@@ -2100,4 +2100,206 @@ describe("3-State Sync Algorithm", () => {
       expect(result.conflicts).to.be.empty;
     });
   });
+
+  // ============================================
+  // INDEX 3-WAY MERGE (no conflicts, pick winner)
+  // ============================================
+
+  describe("Index 3-Way Merge", () => {
+    it("Index: only remote changed -> remote wins", () => {
+      // Baseline: X@5
+      // Local: X@5 (unchanged)
+      // Remote: X@6 (changed)
+      // Result: X@6 (remote wins)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 6 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      expect(result.conflicts).to.be.empty;
+      // newState should have index 6 (remote wins)
+      const xInNewState = result.newState.find((bm) => bm.title === "X");
+      expect(xInNewState.index).to.equal(6);
+      // localChanges should have update to move from 5 to 6
+      expect(result.localChanges.updates).to.have.lengthOf(1);
+      expect(result.localChanges.updates[0].oldBookmark.index).to.equal(5);
+      expect(result.localChanges.updates[0].newBookmark.index).to.equal(6);
+    });
+
+    it("Index: only local changed -> local wins", () => {
+      // Baseline: X@5
+      // Local: X@4 (changed)
+      // Remote: X@5 (unchanged)
+      // Result: X@4 (local wins)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 4 },
+      ];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      expect(result.conflicts).to.be.empty;
+      // newState should have index 4 (local wins)
+      const xInNewState = result.newState.find((bm) => bm.title === "X");
+      expect(xInNewState.index).to.equal(4);
+      // remoteChanges should have update to move from 5 to 4
+      expect(result.remoteChanges.updates).to.have.lengthOf(1);
+      expect(result.remoteChanges.updates[0].oldBookmark.index).to.equal(5);
+      expect(result.remoteChanges.updates[0].newBookmark.index).to.equal(4);
+    });
+
+    it("Index: both changed -> local wins (no conflict)", () => {
+      // Baseline: X@5
+      // Local: X@4 (changed)
+      // Remote: X@6 (changed)
+      // Result: X@4 (local wins, no conflict)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 4 },
+      ];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 6 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      // No conflict - local wins when both changed
+      expect(result.conflicts).to.be.empty;
+      // newState should have index 4 (local wins)
+      const xInNewState = result.newState.find((bm) => bm.title === "X");
+      expect(xInNewState.index).to.equal(4);
+    });
+
+    it("Index: both same -> no change", () => {
+      // Baseline: X@5
+      // Local: X@6 (changed)
+      // Remote: X@6 (changed to same)
+      // Result: X@6 (both agree)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 6 },
+      ];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 6 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      expect(result.conflicts).to.be.empty;
+      expect(result.localChanges.updates).to.be.empty;
+      expect(result.remoteChanges.updates).to.be.empty;
+      const xInNewState = result.newState.find((bm) => bm.title === "X");
+      expect(xInNewState.index).to.equal(6);
+    });
+
+    it("Index: ping-pong prevention - Machine B accepts Machine A's index", () => {
+      // Machine A changed index from 5 to 4, pushed to remote
+      // Machine B syncs:
+      //   - B's baseline: X@5 (old)
+      //   - B's local: X@5 (B didn't change it)
+      //   - Remote: X@4 (A's change)
+      // Result: B accepts X@4 (remote wins because B didn't change)
+
+      const oldRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 5 },
+      ];
+      const currentRemoteState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 4 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      expect(result.conflicts).to.be.empty;
+      // B should accept A's index (remote wins)
+      const xInNewState = result.newState.find((bm) => bm.title === "X");
+      expect(xInNewState.index).to.equal(4);
+      // localChanges should have update
+      expect(result.localChanges.updates).to.have.lengthOf(1);
+    });
+
+    it("Index: deletion causes shift - no false conflict", () => {
+      // Baseline: F@0, X@1
+      // Local: deleted F, X shifted to @0
+      // Remote: F@0, X@1 (unchanged)
+      // Result: F deleted, X@0 (local wins because local changed)
+
+      const oldRemoteState = [
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 1 },
+      ];
+      const currentLocalState = [
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 0 },
+        {
+          title: "F",
+          path: ["Toolbar"],
+          index: 0,
+          deleted: true,
+          deletedAt: Date.now(),
+        },
+      ];
+      const currentRemoteState = [
+        { title: "F", path: ["Toolbar"], index: 0 },
+        { title: "X", url: "http://x.com", path: ["Toolbar"], index: 1 },
+      ];
+
+      const result = calcSyncChanges(
+        oldRemoteState,
+        currentLocalState,
+        currentRemoteState,
+      );
+
+      expect(result.conflicts).to.be.empty;
+      // F should be deleted on remote
+      expect(result.remoteChanges.deletions).to.have.lengthOf(1);
+      expect(result.remoteChanges.deletions[0].title).to.equal("F");
+      // X should have index 0 in newState (local wins)
+      const xInNewState = result.newState.find(
+        (bm) => bm.title === "X" && !bm.deleted,
+      );
+      expect(xInNewState.index).to.equal(0);
+    });
+  });
 });

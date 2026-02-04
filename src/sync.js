@@ -322,34 +322,12 @@ function mergeStates(oldState, localState, remoteState) {
       const localIndex = localCurrent.index;
       const remoteIndex = remoteCurrent.index;
 
-      // 3-way merge for index
-      if (localIndex === remoteIndex) {
-        // Same index on both sides - no conflict
-        newState.push({ ...old, index: localIndex });
-      } else if (
-        localIndex === baselineIndex &&
-        remoteIndex !== baselineIndex
-      ) {
-        // Only remote changed - remote wins
-        newState.push({ ...old, index: remoteIndex });
-      } else if (
-        remoteIndex === baselineIndex &&
-        localIndex !== baselineIndex
-      ) {
-        // Only local changed - local wins
-        newState.push({ ...old, index: localIndex });
-      } else {
-        // Both changed to different values - conflict
-        conflicts.push({
-          type: "index_conflict",
-          bookmark: old,
-          localVersion: localCurrent,
-          remoteVersion: remoteCurrent,
-          attribute: "index",
-        });
-        // For now, keep local version in newState (will be resolved by user)
-        newState.push({ ...old, index: localIndex });
-      }
+      // 3-way merge for index (no conflicts, just pick winner)
+      // If local changed from baseline → local wins (intentional)
+      // If local unchanged from baseline → remote wins
+      const localChanged = localIndex !== baselineIndex;
+      const winningIndex = localChanged ? localIndex : remoteIndex;
+      newState.push({ ...old, index: winningIndex });
       addedKeys.add(bookmarkKey(old));
       continue;
     }

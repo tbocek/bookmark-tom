@@ -399,6 +399,43 @@ async function syncAllBookmarks(url, username, password, fromBackgroundTimer) {
     remoteChanges.updates.length > 0 ||
     allConflicts.length > 0;
 
+  // Check if only index updates (no structural changes or conflicts)
+  const onlyIndexUpdates =
+    localChanges.insertions.length === 0 &&
+    localChanges.deletions.length === 0 &&
+    remoteChanges.insertions.length === 0 &&
+    remoteChanges.deletions.length === 0 &&
+    allConflicts.length === 0 &&
+    (localChanges.updates.length > 0 || remoteChanges.updates.length > 0);
+
+  // Apply index updates silently (no confirmation needed)
+  if (onlyIndexUpdates) {
+    // Save debug log
+    await saveDebugLog(pendingDebugLog);
+
+    // Apply local index updates (remote wins, so we update local)
+    if (localChanges.updates.length > 0) {
+      syncInProgress = true;
+      try {
+        await applyLocalUpdates(localChanges.updates);
+      } finally {
+        syncInProgress = false;
+      }
+    }
+
+    // Get final state and sync
+    const finalBookmarks = await getLocalBookmarksSnapshot();
+    const remoteTombstones = getTombstones(currentRemoteState);
+    const filteredTombstones = remoteTombstones.filter((tombstone) =>
+      shouldKeepTombstone(tombstone, finalBookmarks),
+    );
+    const newRemoteData = [...finalBookmarks, ...filteredTombstones];
+    await updateWebDAV(url, username, password, newRemoteData);
+    await saveLocalTombstones(filteredTombstones);
+    await saveLastSyncedState(finalBookmarks);
+    return;
+  }
+
   // Even if no sync changes, filter out stale tombstones (revived items)
   if (!hasChanges) {
     const remoteActive = getActive(currentRemoteState);
