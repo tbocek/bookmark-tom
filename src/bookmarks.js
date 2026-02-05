@@ -371,3 +371,32 @@ async function applyLocalUpdates(updates) {
     throw error;
   }
 }
+
+// ============================================
+// EXPORTS
+// ============================================
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    getBookmarkPath,
+    retrieveLocalBookmarks,
+    getLocalBookmarksSnapshot,
+    locateBookmarkId,
+    locateParentId,
+    createFolderPath,
+    modifyLocalBookmarks,
+    applyLocalUpdates,
+  };
+}
+
+// For eval-based loading in tests
+({
+  getBookmarkPath,
+  retrieveLocalBookmarks,
+  getLocalBookmarksSnapshot,
+  locateBookmarkId,
+  locateParentId,
+  createFolderPath,
+  modifyLocalBookmarks,
+  applyLocalUpdates,
+});

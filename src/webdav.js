@@ -82,3 +82,26 @@ async function loadConfig() {
     checkInterval: parseInt(result.checkIntervalMinutes, 10) || 5,
   };
 }
+
+// ============================================
+// EXPORTS
+// ============================================
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    createWebDAVHeaders,
+    addCacheBuster,
+    fetchWebDAV,
+    updateWebDAV,
+    loadConfig,
+  };
+}
+
+// For eval-based loading in tests
+({
+  createWebDAVHeaders,
+  addCacheBuster,
+  fetchWebDAV,
+  updateWebDAV,
+  loadConfig,
+});

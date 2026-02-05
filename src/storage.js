@@ -244,3 +244,42 @@ async function getDebugLogs() {
   const storage = await browser.storage.local.get(["debugLogs"]);
   return storage.debugLogs || [];
 }
+
+// ============================================
+// EXPORTS
+// ============================================
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    getBookmarkIdMap,
+    saveBookmarkIdMap,
+    initializeBookmarkIdMap,
+    recordChange,
+    getLocalTombstones,
+    saveLocalTombstones,
+    addLocalTombstone,
+    addLocalTombstoneDirectly,
+    removeLocalTombstonesForPath,
+    getLastSyncedState,
+    saveLastSyncedState,
+    saveDebugLog,
+    getDebugLogs,
+  };
+}
+
+// For eval-based loading in tests
+({
+  getBookmarkIdMap,
+  saveBookmarkIdMap,
+  initializeBookmarkIdMap,
+  recordChange,
+  getLocalTombstones,
+  saveLocalTombstones,
+  addLocalTombstone,
+  addLocalTombstoneDirectly,
+  removeLocalTombstonesForPath,
+  getLastSyncedState,
+  saveLastSyncedState,
+  saveDebugLog,
+  getDebugLogs,
+});
