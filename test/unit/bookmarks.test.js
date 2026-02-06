@@ -54,7 +54,9 @@ describe("Bookmarks Module", () => {
         .resolves([{ id: "child1", title: "News", parentId: "toolbar" }]);
       browser.bookmarks.get
         .withArgs("toolbar")
-        .resolves([{ id: "toolbar", title: "Bookmarks Toolbar", parentId: "root" }]);
+        .resolves([
+          { id: "toolbar", title: "Bookmarks Toolbar", parentId: "root" },
+        ]);
       browser.bookmarks.get
         .withArgs("root")
         .resolves([{ id: "root", title: "" }]);
@@ -94,9 +96,7 @@ describe("Bookmarks Module", () => {
             {
               title: "News",
               index: 1,
-              children: [
-                { title: "BBC", url: "http://bbc.com", index: 0 },
-              ],
+              children: [{ title: "BBC", url: "http://bbc.com", index: 0 }],
             },
           ],
         },
@@ -115,9 +115,7 @@ describe("Bookmarks Module", () => {
         {
           title: "",
           index: 0,
-          children: [
-            { title: "X", url: "http://x.com", index: 0 },
-          ],
+          children: [{ title: "X", url: "http://x.com", index: 0 }],
         },
       ];
 
@@ -134,7 +132,13 @@ describe("Bookmarks Module", () => {
   describe("locateBookmarkId()", () => {
     it("finds bookmark by URL search", async () => {
       browser.bookmarks.search.resolves([
-        { id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "toolbar" },
+        {
+          id: "bm1",
+          title: "X",
+          url: "http://x.com",
+          index: 0,
+          parentId: "toolbar",
+        },
       ]);
       browser.bookmarks.get
         .withArgs("toolbar")
@@ -149,7 +153,13 @@ describe("Bookmarks Module", () => {
 
     it("returns null when path does not match", async () => {
       browser.bookmarks.search.resolves([
-        { id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "other" },
+        {
+          id: "bm1",
+          title: "X",
+          url: "http://x.com",
+          index: 0,
+          parentId: "other",
+        },
       ]);
       browser.bookmarks.get
         .withArgs("other")
@@ -165,11 +175,19 @@ describe("Bookmarks Module", () => {
     it("falls back to title search when URL search fails", async () => {
       // First call for URL search throws
       browser.bookmarks.search
-        .onFirstCall().rejects(new Error("URL search failed"));
+        .onFirstCall()
+        .rejects(new Error("URL search failed"));
       // Second call for title search returns result
       browser.bookmarks.search
-        .onSecondCall().resolves([
-          { id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "toolbar" },
+        .onSecondCall()
+        .resolves([
+          {
+            id: "bm1",
+            title: "X",
+            url: "http://x.com",
+            index: 0,
+            parentId: "toolbar",
+          },
         ]);
       browser.bookmarks.get
         .withArgs("toolbar")
@@ -293,7 +311,10 @@ describe("Bookmarks Module", () => {
         { id: "existingFolder", title: "ExistingFolder" },
       ]);
 
-      const id = await createFolderPath(["Bookmarks Toolbar", "ExistingFolder"]);
+      const id = await createFolderPath([
+        "Bookmarks Toolbar",
+        "ExistingFolder",
+      ]);
       expect(id).to.equal("existingFolder");
       expect(browser.bookmarks.create.called).to.be.false;
     });
@@ -311,9 +332,7 @@ describe("Bookmarks Module", () => {
         {
           id: "root",
           title: "",
-          children: [
-            { id: "toolbar", title: "Toolbar", children: [] },
-          ],
+          children: [{ id: "toolbar", title: "Toolbar", children: [] }],
         },
       ]);
       browser.bookmarks.getChildren.resolves([]);
@@ -323,7 +342,15 @@ describe("Bookmarks Module", () => {
       const deleteOrder = [];
       browser.bookmarks.search.callsFake(async (query) => {
         if (query.url === "http://x.com" || query.query === "http://x.com") {
-          return [{ id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "f1" }];
+          return [
+            {
+              id: "bm1",
+              title: "X",
+              url: "http://x.com",
+              index: 0,
+              parentId: "f1",
+            },
+          ];
         }
         if (query.title === "F") {
           return [{ id: "f1", title: "F", index: 0, parentId: "toolbar" }];
@@ -332,13 +359,18 @@ describe("Bookmarks Module", () => {
       });
       browser.bookmarks.get.callsFake(async (id) => {
         if (id === "f1") return [{ id: "f1", title: "F", parentId: "toolbar" }];
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
 
-      browser.bookmarks.remove.callsFake(async () => { deleteOrder.push("bookmark"); });
-      browser.bookmarks.removeTree.callsFake(async () => { deleteOrder.push("folder"); });
+      browser.bookmarks.remove.callsFake(async () => {
+        deleteOrder.push("bookmark");
+      });
+      browser.bookmarks.removeTree.callsFake(async () => {
+        deleteOrder.push("folder");
+      });
 
       const deletions = [
         { title: "F", path: ["Toolbar"], index: 0 }, // folder
@@ -357,7 +389,8 @@ describe("Bookmarks Module", () => {
         { id: "f1", title: "F", index: 0, parentId: "toolbar" },
       ]);
       browser.bookmarks.get.callsFake(async (id) => {
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
@@ -379,9 +412,7 @@ describe("Bookmarks Module", () => {
         {
           id: "root",
           title: "",
-          children: [
-            { id: "toolbar", title: "Toolbar", children: [] },
-          ],
+          children: [{ id: "toolbar", title: "Toolbar", children: [] }],
         },
       ]);
       browser.bookmarks.getChildren.resolves([]);
@@ -402,10 +433,17 @@ describe("Bookmarks Module", () => {
     it("skips insert when bookmark already exists", async () => {
       // locateBookmarkId finds existing
       browser.bookmarks.search.resolves([
-        { id: "existing", title: "X", url: "http://x.com", index: 0, parentId: "toolbar" },
+        {
+          id: "existing",
+          title: "X",
+          url: "http://x.com",
+          index: 0,
+          parentId: "toolbar",
+        },
       ]);
       browser.bookmarks.get.callsFake(async (id) => {
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
@@ -419,6 +457,38 @@ describe("Bookmarks Module", () => {
       // Should NOT create (already exists)
       expect(browser.bookmarks.create.called).to.be.false;
     });
+
+    it("inserts multiple bookmarks in correct index order", async () => {
+      browser.bookmarks.search.resolves([]);
+      browser.bookmarks.getTree.resolves([
+        {
+          id: "root",
+          title: "",
+          children: [{ id: "toolbar", title: "Toolbar", children: [] }],
+        },
+      ]);
+      browser.bookmarks.getChildren.resolves([]);
+      browser.bookmarks.create.resolves({ id: "new1" });
+
+      // Insertions are intentionally out of order by index
+      const insertions = [
+        { title: "C", url: "http://c.com", path: ["Toolbar"], index: 2 },
+        { title: "A", url: "http://a.com", path: ["Toolbar"], index: 0 },
+        { title: "B", url: "http://b.com", path: ["Toolbar"], index: 1 },
+      ];
+
+      await modifyLocalBookmarks([], insertions, []);
+
+      // Should insert in ascending index order: A (index 0), B (index 1), C (index 2)
+      const calls = browser.bookmarks.create.getCalls();
+      expect(calls).to.have.lengthOf(3);
+      expect(calls[0].args[0].title).to.equal("A");
+      expect(calls[0].args[0].index).to.equal(0);
+      expect(calls[1].args[0].title).to.equal("B");
+      expect(calls[1].args[0].index).to.equal(1);
+      expect(calls[2].args[0].title).to.equal("C");
+      expect(calls[2].args[0].index).to.equal(2);
+    });
   });
 
   // ============================================
@@ -428,19 +498,38 @@ describe("Bookmarks Module", () => {
   describe("applyLocalUpdates()", () => {
     it("applies title change", async () => {
       browser.bookmarks.search.resolves([
-        { id: "bm1", title: "Old", url: "http://x.com", index: 0, parentId: "toolbar" },
+        {
+          id: "bm1",
+          title: "Old",
+          url: "http://x.com",
+          index: 0,
+          parentId: "toolbar",
+        },
       ]);
       browser.bookmarks.get.callsFake(async (id) => {
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
 
-      await applyLocalUpdates([{
-        oldBookmark: { title: "Old", url: "http://x.com", index: 0, path: ["Toolbar"] },
-        newBookmark: { title: "New", url: "http://x.com", index: 0, path: ["Toolbar"] },
-        changedAttribute: "title",
-      }]);
+      await applyLocalUpdates([
+        {
+          oldBookmark: {
+            title: "Old",
+            url: "http://x.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          newBookmark: {
+            title: "New",
+            url: "http://x.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          changedAttribute: "title",
+        },
+      ]);
 
       expect(browser.bookmarks.update.calledOnce).to.be.true;
       expect(browser.bookmarks.update.firstCall.args[1].title).to.equal("New");
@@ -448,19 +537,38 @@ describe("Bookmarks Module", () => {
 
     it("applies index change via move", async () => {
       browser.bookmarks.search.resolves([
-        { id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "toolbar" },
+        {
+          id: "bm1",
+          title: "X",
+          url: "http://x.com",
+          index: 0,
+          parentId: "toolbar",
+        },
       ]);
       browser.bookmarks.get.callsFake(async (id) => {
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
 
-      await applyLocalUpdates([{
-        oldBookmark: { title: "X", url: "http://x.com", index: 0, path: ["Toolbar"] },
-        newBookmark: { title: "X", url: "http://x.com", index: 5, path: ["Toolbar"] },
-        changedAttribute: "index",
-      }]);
+      await applyLocalUpdates([
+        {
+          oldBookmark: {
+            title: "X",
+            url: "http://x.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          newBookmark: {
+            title: "X",
+            url: "http://x.com",
+            index: 5,
+            path: ["Toolbar"],
+          },
+          changedAttribute: "index",
+        },
+      ]);
 
       expect(browser.bookmarks.move.calledOnce).to.be.true;
       expect(browser.bookmarks.move.firstCall.args[1].index).to.equal(5);
@@ -468,10 +576,17 @@ describe("Bookmarks Module", () => {
 
     it("applies path change via move to new parent", async () => {
       browser.bookmarks.search.resolves([
-        { id: "bm1", title: "X", url: "http://x.com", index: 0, parentId: "toolbar" },
+        {
+          id: "bm1",
+          title: "X",
+          url: "http://x.com",
+          index: 0,
+          parentId: "toolbar",
+        },
       ]);
       browser.bookmarks.get.callsFake(async (id) => {
-        if (id === "toolbar") return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
+        if (id === "toolbar")
+          return [{ id: "toolbar", title: "Toolbar", parentId: "root" }];
         if (id === "root") return [{ id: "root", title: "" }];
         return [{ id, title: "" }];
       });
@@ -483,33 +598,57 @@ describe("Bookmarks Module", () => {
             {
               id: "toolbar",
               title: "Toolbar",
-              children: [
-                { id: "folder2", title: "F2", children: [] },
-              ],
+              children: [{ id: "folder2", title: "F2", children: [] }],
             },
           ],
         },
       ]);
 
-      await applyLocalUpdates([{
-        oldBookmark: { title: "X", url: "http://x.com", index: 0, path: ["Toolbar"] },
-        newBookmark: { title: "X", url: "http://x.com", index: 0, path: ["Toolbar", "F2"] },
-        changedAttribute: "path",
-      }]);
+      await applyLocalUpdates([
+        {
+          oldBookmark: {
+            title: "X",
+            url: "http://x.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          newBookmark: {
+            title: "X",
+            url: "http://x.com",
+            index: 0,
+            path: ["Toolbar", "F2"],
+          },
+          changedAttribute: "path",
+        },
+      ]);
 
       expect(browser.bookmarks.move.calledOnce).to.be.true;
-      expect(browser.bookmarks.move.firstCall.args[1].parentId).to.equal("folder2");
+      expect(browser.bookmarks.move.firstCall.args[1].parentId).to.equal(
+        "folder2",
+      );
     });
 
     it("warns and continues when bookmark not found", async () => {
       browser.bookmarks.search.resolves([]);
 
       // Should not throw
-      await applyLocalUpdates([{
-        oldBookmark: { title: "Missing", url: "http://missing.com", index: 0, path: ["Toolbar"] },
-        newBookmark: { title: "New", url: "http://missing.com", index: 0, path: ["Toolbar"] },
-        changedAttribute: "title",
-      }]);
+      await applyLocalUpdates([
+        {
+          oldBookmark: {
+            title: "Missing",
+            url: "http://missing.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          newBookmark: {
+            title: "New",
+            url: "http://missing.com",
+            index: 0,
+            path: ["Toolbar"],
+          },
+          changedAttribute: "title",
+        },
+      ]);
 
       expect(browser.bookmarks.update.called).to.be.false;
     });

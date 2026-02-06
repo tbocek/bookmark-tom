@@ -300,8 +300,14 @@ async function modifyLocalBookmarks(
       }
     }
 
+    // Sort insertions by index (ascending) to maintain correct positions
+    // When inserting at specific indices, earlier indices must be inserted first
+    const sortedInsertions = [...insBookmarks].sort(
+      (a, b) => a.index - b.index,
+    );
+
     // Insert bookmarks
-    for (const insBookmark of insBookmarks) {
+    for (const insBookmark of sortedInsertions) {
       const id = await locateBookmarkId(
         insBookmark.url,
         insBookmark.title,
@@ -331,10 +337,18 @@ async function modifyLocalBookmarks(
 
 /**
  * Apply updates to local bookmarks (title, url, index, path changes)
+ *
+ * For index updates: items are sorted by target index (ascending) and processed
+ * in order. This ensures correct positioning when multiple items are reordered.
  */
 async function applyLocalUpdates(updates) {
   try {
-    for (const update of updates) {
+    // Separate index updates from other updates
+    const indexUpdates = updates.filter((u) => u.changedAttribute === "index");
+    const otherUpdates = updates.filter((u) => u.changedAttribute !== "index");
+
+    // Apply non-index updates first
+    for (const update of otherUpdates) {
       const { oldBookmark, newBookmark, changedAttribute } = update;
 
       const id = await locateBookmarkId(
@@ -354,8 +368,6 @@ async function applyLocalUpdates(updates) {
           title: newBookmark.title,
           url: newBookmark.url,
         });
-      } else if (changedAttribute === "index") {
-        await browser.bookmarks.move(id, { index: newBookmark.index });
       } else if (changedAttribute === "path") {
         const newParentId = await locateParentId(newBookmark.path, true);
         if (newParentId) {
@@ -365,6 +377,31 @@ async function applyLocalUpdates(updates) {
           });
         }
       }
+    }
+
+    // Sort index updates by target index (ascending) to maintain correct positions
+    const sortedIndexUpdates = [...indexUpdates].sort(
+      (a, b) => a.newBookmark.index - b.newBookmark.index,
+    );
+
+    // Apply index updates in order
+    for (const update of sortedIndexUpdates) {
+      const { oldBookmark, newBookmark } = update;
+
+      // Re-locate the bookmark since indices may have shifted from previous moves
+      const id = await locateBookmarkId(
+        oldBookmark.url,
+        oldBookmark.title,
+        null, // Don't match by index since it may have changed
+        oldBookmark.path,
+      );
+
+      if (!id) {
+        console.warn("Could not find bookmark to update index:", oldBookmark);
+        continue;
+      }
+
+      await browser.bookmarks.move(id, { index: newBookmark.index });
     }
   } catch (error) {
     console.error("Error applying updates:", error);
