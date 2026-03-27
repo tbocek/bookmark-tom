@@ -59,7 +59,7 @@ async function updateWebDAV(url, username, password, bookmarks) {
     method: "PUT",
     headers,
     credentials: "omit",
-    body: JSON.stringify(bookmarks),
+    body: JSON.stringify(bookmarks, null, 2),
   });
 
   if (!response.ok) {
