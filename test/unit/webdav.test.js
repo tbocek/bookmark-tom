@@ -169,7 +169,7 @@ describe("WebDAV Module", () => {
       const [url, options] = global.fetch.firstCall.args;
       expect(url).to.equal("http://example.com/bm.json");
       expect(options.method).to.equal("PUT");
-      expect(options.body).to.equal(JSON.stringify(bookmarks));
+      expect(options.body).to.equal(JSON.stringify(bookmarks, null, 2));
       expect(options.credentials).to.equal("omit");
     });
 
